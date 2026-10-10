@@ -41,7 +41,11 @@ def test_create_ydl_opts_mp4():
     assert opts['force_keyframes_at_cuts'] is True
     assert 'download_ranges' in opts
     assert opts['writesubtitles'] is True
+    assert opts['writeautomaticsub'] is True
     assert opts['subtitleslangs'] == ['en']
+    assert opts['concurrent_fragment_downloads'] == 4
+    assert opts['buffersize'] == 1024 * 1024
+    assert opts['extractor_args']['youtube']['player_client'] == ['web', 'default']
 
 def test_create_ydl_opts_mp3():
     req = DownloadRequest(
@@ -73,7 +77,57 @@ def test_create_ydl_opts_srt():
 
     assert opts['skip_download'] is True
     assert opts['writesubtitles'] is True
+    assert opts['writeautomaticsub'] is True
     assert opts['subtitleslangs'] == ['es']
 
     pp_keys = [pp['key'] for pp in opts['postprocessors']]
     assert 'FFmpegSubtitlesConvertor' in pp_keys
+
+def test_create_ydl_opts_with_progress_port():
+    req = DownloadRequest(
+        url="https://youtube.com/watch?v=sample",
+        mode="mp4",
+        trim=TrimConfig(start=10, end=40)
+    )
+    opts = create_ydl_opts("job12345", req, progress_port=12345)
+
+    assert 'external_downloader_args' in opts
+    assert opts['external_downloader_args']['ffmpeg_o'] == ['-progress', 'tcp://127.0.0.1:12345']
+    assert 'postprocessor_args' in opts
+    assert opts['postprocessor_args']['ffmpeg'] == ['-progress', 'tcp://127.0.0.1:12345']
+
+def test_handle_ffmpeg_progress_trim():
+    from app.services.jobs import job_manager
+    from app.services.downloader import _handle_ffmpeg_progress
+
+    req = DownloadRequest(
+        url="https://youtube.com/watch?v=sample",
+        mode="mp4",
+        trim=TrimConfig(start=358, end=495)  # 137s
+    )
+    job = job_manager.create_job(req)
+
+    # 50% through (68.5s)
+    metrics = {
+        'out_time_us': '68500000',
+        'speed': '2.0x',
+        'total_size': '5242880',
+        'progress': 'continue'
+    }
+    _handle_ffmpeg_progress(job.id, req, metrics)
+
+    updated = job_manager.get_job(job.id)
+    assert updated is not None
+    assert updated.status == "downloading"
+    assert updated.progress == 49.0  # (68.5 / 137) * 98.0
+    assert updated.speed == "2.0x speed"
+    assert updated.eta == "0:34"  # (137 - 68.5) / 2.0 = 34.25s
+    assert updated.got == "5.0 MB"
+    assert "Trimming segment (1:08 / 2:17)" in updated.stage
+
+    # Test completion packet
+    _handle_ffmpeg_progress(job.id, req, {'progress': 'end'})
+    final_updated = job_manager.get_job(job.id)
+    assert final_updated.progress == 99.0
+    assert final_updated.stage == "Finalizing container..."
+

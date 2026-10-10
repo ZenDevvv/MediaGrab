@@ -208,12 +208,13 @@
     }
 
     const html = list.map((item) => `
-      <div class="file-card compact">
-        <div class="nm">
-          <svg class="ico" viewBox="0 0 24 24"><use href="#${item.format.toLowerCase().includes('mp3') ? 'i-audio' : 'i-video'}"/></svg>
+      <div class="frow">
+        <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#${item.format && item.format.toLowerCase().includes('mp3') ? 'i-audio' : 'i-video'}"/></svg>
+        <div>
           <code title="${item.filename}">${item.filename}</code>
-          <span class="meta">${item.size || item.format}</span>
+          <span class="mono">${item.format} · ${item.size || 'Ready'} · gone in 30:00</span>
         </div>
+        <a class="btn btn-sm" href="${item.downloadUrl || '#'}" download="${item.filename}"><span>Save</span></a>
       </div>
     `).join('');
 
@@ -269,15 +270,23 @@
     if (te && document.activeElement !== te) te.value = formatSeconds(end);
 
     // Duration displays
-    $('#ruler-start').textContent = '0:00';
-    $('#ruler-end').textContent = formatSeconds(total);
-    $('#trim-calc-dur').textContent = formatSeconds(duration);
-    $('#trim-calc-note').textContent = `of ${formatSeconds(total)}`;
-
-    const savingsPct = total > 0 ? Math.round((1 - duration / total) * 100) : 0;
-    $('#trim-calc-savings').textContent = isWhole
-      ? 'The whole video is downloaded.'
-      : `Only this segment is downloaded, about ${savingsPct}% less bandwidth.`;
+    const rStart = $('#ruler-start');
+    if (rStart) rStart.textContent = '0:00';
+    const rEnd = $('#ruler-end');
+    if (rEnd) rEnd.textContent = formatSeconds(total);
+    const clipDisp = $('#t-clip-display');
+    if (clipDisp) clipDisp.innerHTML = `${formatSeconds(duration)} <small id="t-clip-total">of ${formatSeconds(total)}</small>`;
+    const calcDur = $('#trim-calc-dur');
+    if (calcDur) calcDur.textContent = formatSeconds(duration);
+    const calcNote = $('#trim-calc-note');
+    if (calcNote) calcNote.textContent = `of ${formatSeconds(total)}`;
+    const calcSavings = $('#trim-calc-savings');
+    if (calcSavings) {
+      const savingsPct = total > 0 ? Math.round((1 - duration / total) * 100) : 0;
+      calcSavings.textContent = isWhole
+        ? 'The whole video is downloaded.'
+        : `Only this segment is downloaded, about ${savingsPct}% less bandwidth.`;
+    }
 
     // Highlight active bars
     const barEls = $$('#trim-bars-container i');
@@ -290,8 +299,10 @@
     const summaryText = isWhole
       ? `Whole video · ${formatSeconds(total)}`
       : `${formatSeconds(start)} to ${formatSeconds(end)} · ${formatSeconds(duration)}`;
-    $('#trim-summary-text').textContent = summaryText;
-    $('#config-summary-clip').textContent = `Clip: ${summaryText}`;
+    const trimSummaryEl = $('#trim-summary-text');
+    if (trimSummaryEl) trimSummaryEl.textContent = summaryText;
+    const cfgClip = $('#config-summary-clip');
+    if (cfgClip) cfgClip.textContent = `Clip: ${summaryText}`;
 
     // Recalculate dynamic sizes
     recalcSizes();
@@ -323,27 +334,46 @@
   }
 
   function updateActionButtonLabel() {
-    const duration = AppState.trim.end - AppState.trim.start;
+    const duration = Math.max(1, AppState.trim.end - AppState.trim.start);
     const total = AppState.trim.total || 1;
     const ratio = Math.max(0.01, duration / total);
+    const isWhole = (AppState.trim.start === 0 && AppState.trim.end === total);
+    const clipStr = isWhole ? 'Whole video' : `${formatSeconds(AppState.trim.start)} to ${formatSeconds(AppState.trim.end)}`;
 
     let label = '';
+    let spec = '';
+
     if (AppState.mode === 'mp4') {
       const selectedChip = $('#video-qualities-grid .chip.selected');
       const res = AppState.selectedQuality || '1080p';
       const baseBytes = selectedChip ? parseInt(selectedChip.dataset.baseBytes || '0', 10) : 0;
       const sizeStr = baseBytes > 0 ? ` · ${formatBytes(Math.round(baseBytes * ratio))}` : '';
-      label = `Grab MP4 (${res})${sizeStr}`;
-      $('#config-summary-details').textContent = `Quality: ${res}`;
-      $('#config-badge-mode').textContent = 'MP4';
+      label = `Grab MP4${sizeStr}`;
+
+      const subsName = $('#subs-track-name')?.textContent;
+      const subsStr = AppState.subtitles && AppState.subtitles.lang && subsName && subsName !== 'None' ? `${subsName} captions` : 'No captions';
+      spec = `MP4 · ${res} · ${clipStr} · ${subsStr}`;
+
+      const cfgMode = $('#config-badge-mode');
+      if (cfgMode) cfgMode.textContent = 'MP4';
+      const cfgDetails = $('#config-summary-details');
+      if (cfgDetails) cfgDetails.textContent = `Quality: ${res}`;
     } else {
       const kbps = AppState.selectedBitrate || 192;
       const bytes = Math.round((kbps * 1000 / 8) * duration);
-      label = `Grab MP3 (${kbps} kbps) · ${formatBytes(bytes)}`;
-      $('#config-summary-details').textContent = `Bitrate: ${kbps} kbps`;
-      $('#config-badge-mode').textContent = 'MP3';
+      label = `Grab MP3 · ${formatBytes(bytes)}`;
+      spec = `MP3 · ${kbps} kbps · ${clipStr}`;
+
+      const cfgMode = $('#config-badge-mode');
+      if (cfgMode) cfgMode.textContent = 'MP3';
+      const cfgDetails = $('#config-summary-details');
+      if (cfgDetails) cfgDetails.textContent = `Bitrate: ${kbps} kbps`;
     }
-    $('#btn-download-label').textContent = label;
+
+    const btnLabel = $('#btn-download-label');
+    if (btnLabel) btnLabel.textContent = label;
+    const specEl = $('#config-summary-spec');
+    if (specEl) specEl.textContent = spec;
   }
 
   // --- API Client: Metadata Inspection ---
@@ -461,34 +491,75 @@
     AppState.selectedQuality = qualities[0].resolution;
 
     // Populate Subtitles
-    const subsList = $('#subtitles-list');
-    subsList.innerHTML = '';
-
-    const noneRow = document.createElement('div');
-    noneRow.className = 'audio-row selected';
-    noneRow.dataset.lang = '';
-    noneRow.innerHTML = `
-      <span class="dot"></span>
-      <span><span class="nm">None</span><span class="ds">No subtitle track</span></span>
-    `;
-    noneRow.addEventListener('click', () => selectSubtitleTrack(noneRow, null));
-    subsList.appendChild(noneRow);
+    const subsTrackRow = $('#row-subs-track');
+    const subsTrackName = $('#subs-track-name');
+    const subsTrackDesc = $('#subs-track-desc');
+    const subsDoneBtn = $('#btn-save-srt-instant');
 
     if (data.subtitles && data.subtitles.length) {
-      data.subtitles.forEach((s) => {
-        const row = document.createElement('div');
-        row.className = 'audio-row';
-        row.dataset.lang = s.lang;
-        row.innerHTML = `
-          <span class="dot"></span>
-          <span>
-            <span class="nm">${s.label} ${s.is_auto ? '<small style="opacity:0.7;">(auto)</small>' : ''}</span>
-            <span class="ds">${s.is_auto ? 'Machine generated' : 'Uploaded by creator'}</span>
-          </span>
-        `;
-        row.addEventListener('click', () => selectSubtitleTrack(row, s.lang, s.label));
-        subsList.appendChild(row);
-      });
+      const s = data.subtitles[0];
+      AppState.subtitles.lang = s.lang;
+      if (subsTrackName) subsTrackName.textContent = s.label || s.lang;
+      if (subsTrackDesc) subsTrackDesc.textContent = s.is_auto ? 'Machine generated captions' : 'Written by the creator';
+      if (subsDoneBtn) subsDoneBtn.style.display = 'inline-flex';
+
+      if (subsTrackRow && data.subtitles.length > 1) {
+        let subIdx = 0;
+        subsTrackRow.style.cursor = 'pointer';
+        subsTrackRow.onclick = (e) => {
+          if (e.target.closest('#btn-save-srt-instant')) return;
+          subIdx = (subIdx + 1) % (data.subtitles.length + 1);
+          if (subIdx === data.subtitles.length) {
+            AppState.subtitles.lang = null;
+            if (subsTrackName) subsTrackName.textContent = 'None';
+            if (subsTrackDesc) subsTrackDesc.textContent = 'No captions';
+            if (subsDoneBtn) subsDoneBtn.style.display = 'none';
+          } else {
+            const cur = data.subtitles[subIdx];
+            AppState.subtitles.lang = cur.lang;
+            if (subsTrackName) subsTrackName.textContent = cur.label || cur.lang;
+            if (subsTrackDesc) subsTrackDesc.textContent = cur.is_auto ? 'Machine generated' : 'Written by the creator';
+            if (subsDoneBtn) subsDoneBtn.style.display = 'inline-flex';
+          }
+          updateActionButtonLabel();
+        };
+      }
+    } else {
+      AppState.subtitles.lang = null;
+      if (subsTrackName) subsTrackName.textContent = 'None';
+      if (subsTrackDesc) subsTrackDesc.textContent = 'No subtitle tracks available';
+      if (subsDoneBtn) subsDoneBtn.style.display = 'none';
+    }
+
+    const subsList = $('#subtitles-list');
+    if (subsList) {
+      subsList.innerHTML = '';
+      const noneRow = document.createElement('div');
+      noneRow.className = 'audio-row selected';
+      noneRow.dataset.lang = '';
+      noneRow.innerHTML = `
+        <span class="dot"></span>
+        <span><span class="nm">None</span><span class="ds">No subtitle track</span></span>
+      `;
+      noneRow.addEventListener('click', () => selectSubtitleTrack(noneRow, null));
+      subsList.appendChild(noneRow);
+
+      if (data.subtitles && data.subtitles.length) {
+        data.subtitles.forEach((s) => {
+          const row = document.createElement('div');
+          row.className = 'audio-row';
+          row.dataset.lang = s.lang;
+          row.innerHTML = `
+            <span class="dot"></span>
+            <span>
+              <span class="nm">${s.label} ${s.is_auto ? '<small style="opacity:0.7;">(auto)</small>' : ''}</span>
+              <span class="ds">${s.is_auto ? 'Machine generated' : 'Uploaded by creator'}</span>
+            </span>
+          `;
+          row.addEventListener('click', () => selectSubtitleTrack(row, s.lang, s.label));
+          subsList.appendChild(row);
+        });
+      }
     }
 
     updateActionButtonLabel();
@@ -552,13 +623,23 @@
     $('#live-eta').textContent = '--:--';
     $('#live-got').textContent = '-- / --';
 
+    const track = $('.track');
+    if (track) track.classList.add('indeterminate');
+
     $$('#live-steps-list li').forEach((li) => {
       li.className = 'todo';
+      li.style.display = '';
       const st = li.querySelector('.st');
       if (st) st.innerHTML = '';
     });
     setStepState('step-inspect', 'done');
     setStepState('step-download', 'now');
+
+    // Only display subtitles step if subtitles were configured
+    const stepSubs = $('#step-subtitles');
+    if (stepSubs) {
+      stepSubs.style.display = AppState.subtitles && AppState.subtitles.lang ? 'flex' : 'none';
+    }
 
     $('#working-spec-format').textContent = AppState.mode === 'mp4'
       ? `MP4 · ${AppState.selectedQuality}`
@@ -615,10 +696,21 @@
   }
 
   function handleProgressUpdate(data) {
-    const pct = Math.min(100, Math.max(0, Math.round(data.progress || 0)));
-    $('#live-pct').innerHTML = `${pct}<small>%</small>`;
-    $('#live-bar-fill').style.width = `${pct}%`;
-    $('#live-clipper').style.left = `${pct}%`;
+    const rawPct = typeof data.progress === 'number' ? data.progress : 0;
+    const pct = Math.min(100, Math.max(0, Math.round(rawPct)));
+
+    const track = $('.track');
+    if (pct > 0) {
+      if (track) track.classList.remove('indeterminate');
+      $('#live-pct').innerHTML = `${pct}<small>%</small>`;
+      $('#live-bar-fill').style.width = `${pct}%`;
+      $('#live-clipper').style.left = `${pct}%`;
+    } else {
+      if (track) track.classList.add('indeterminate');
+      $('#live-pct').innerHTML = '0<small>%</small>';
+      $('#live-bar-fill').style.width = '0%';
+      $('#live-clipper').style.left = '0%';
+    }
 
     if (data.speed) $('#live-speed').textContent = data.speed;
     if (data.eta) $('#live-eta').textContent = data.eta;
@@ -627,30 +719,44 @@
     // Advance Stage steps based on server state string
     const stage = (data.stage || '').toLowerCase();
     if (data.stage) {
-      if (stage.includes('trim')) {
-        const stepDl = $('#step-download');
-        if (stepDl) {
-          stepDl.className = 'now';
-          stepDl.innerHTML = `<span class="st"></span>${data.stage}`;
-        }
+      const stepDl = $('#step-download');
+      if (stepDl && (stage.includes('trim') || stage.includes('download') || stage.includes('stream') || stage.includes('segment') || stage.includes('preparing') || stage.includes('connecting'))) {
+        stepDl.className = 'now';
+        const stSpan = stepDl.querySelector('.st');
+        const stHtml = stSpan ? stSpan.outerHTML : '<span class="st"></span>';
+        stepDl.innerHTML = `${stHtml}${data.stage}`;
       }
     }
-    if (stage.includes('process') || stage.includes('remux') || stage.includes('join') || stage.includes('convert')) {
+    if (stage.includes('process') || stage.includes('remux') || stage.includes('join') || stage.includes('convert') || stage.includes('finalizing')) {
       setStepState('step-download', 'done');
       setStepState('step-process', 'now');
-    } else if (stage.includes('caption') || stage.includes('tag') || stage.includes('art')) {
+    } else if (stage.includes('caption') || stage.includes('tag') || stage.includes('art') || stage.includes('metadata')) {
+      setStepState('step-download', 'done');
       setStepState('step-process', 'done');
       setStepState('step-subtitles', 'now');
     }
   }
 
   function handleComplete(data) {
+    const track = $('.track');
+    if (track) track.classList.remove('indeterminate');
+    $('#live-pct').innerHTML = '100<small>%</small>';
+    $('#live-bar-fill').style.width = '100%';
+    $('#live-clipper').style.left = '100%';
+
+    setStepState('step-download', 'done');
+    setStepState('step-process', 'done');
+    if (AppState.subtitles && AppState.subtitles.lang) {
+      setStepState('step-subtitles', 'done');
+    }
+    setStepState('step-ready', 'done');
+
     // Populate Ready Screen
     $('#ready-filename').textContent = data.filename || 'media-download';
     $('#ready-spec-format').textContent = AppState.mode === 'mp4' ? `MP4 ${AppState.selectedQuality}` : `MP3 ${AppState.selectedBitrate} kbps`;
     $('#ready-spec-duration').textContent = formatSeconds(AppState.trim.end - AppState.trim.start);
     $('#ready-spec-size').textContent = data.size || '-- MB';
-    $('#ready-spec-captions').textContent = AppState.subtitles.lang ? 'Embedded' : 'None';
+    $('#ready-spec-captions').textContent = AppState.subtitles && AppState.subtitles.lang ? 'Embedded' : 'None';
 
     const saveMediaBtn = $('#btn-save-media');
     saveMediaBtn.href = data.download_url;
@@ -682,7 +788,9 @@
     // Start 30-min deletion countdown
     startDeletionCountdown(30 * 60);
 
-    showScreen('ready');
+    setTimeout(() => {
+      showScreen('ready');
+    }, 280);
   }
 
   function startPollingFallback(jobId) {

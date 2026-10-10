@@ -46,7 +46,85 @@ def format_size(bytes_val: Optional[int]) -> str:
         return f"{round(mb)} MB"
     return f"{mb:.1f} MB"
 
-def create_ydl_opts(job_id: str, request: DownloadRequest) -> Dict[str, Any]:
+def _handle_ffmpeg_progress(
+    job_id: str,
+    request: DownloadRequest,
+    metrics: Dict[str, str]
+):
+    progress_status = metrics.get('progress')
+    out_time_us_str = metrics.get('out_time_us')
+    speed_str = metrics.get('speed', '').strip()
+    total_size_str = metrics.get('total_size')
+
+    out_time_s = 0.0
+    if out_time_us_str and out_time_us_str.isdigit():
+        out_time_s = float(out_time_us_str) / 1_000_000.0
+    elif 'out_time' in metrics:
+        parts = metrics['out_time'].split(':')
+        if len(parts) == 3:
+            try:
+                out_time_s = float(parts[0]) * 3600 + float(parts[1]) * 60 + float(parts[2])
+            except ValueError:
+                pass
+
+    speed_float = None
+    if speed_str.endswith('x'):
+        try:
+            speed_float = float(speed_str[:-1])
+        except ValueError:
+            pass
+
+    total_size = int(total_size_str) if total_size_str and total_size_str.isdigit() else None
+
+    if request.trim and request.trim.end > request.trim.start:
+        clip_duration = float(request.trim.end - request.trim.start)
+        pct = (out_time_s / clip_duration * 98.0) if clip_duration > 0 else 0.0
+        pct = min(98.0, max(0.5, pct))
+
+        if speed_float and speed_float > 0.05:
+            rem_s = max(0.0, clip_duration - out_time_s)
+            eta_s = int(rem_s / speed_float)
+            eta_disp = format_eta(eta_s)
+            speed_disp = f"{speed_float:.1f}x speed"
+        else:
+            eta_disp = "--:--"
+            speed_disp = "-- MB/s"
+
+        got_disp = format_size(total_size) if total_size else "-- MB"
+
+        curr_fmt = format_seconds(int(out_time_s))
+        tot_fmt = format_seconds(int(clip_duration))
+        stage_disp = f"Trimming segment ({curr_fmt} / {tot_fmt})"
+
+        if progress_status == 'end':
+            pct = 99.0
+            eta_disp = "0:00"
+            stage_disp = "Finalizing container..."
+
+        job_manager.update_job(
+            job_id,
+            status="downloading" if pct < 99.0 else "processing",
+            progress=round(pct, 1),
+            speed=speed_disp,
+            eta=eta_disp,
+            got=got_disp,
+            stage=stage_disp
+        )
+    else:
+        stage_disp = "Remuxing & processing media..."
+        if out_time_s > 0:
+            stage_disp = f"Remuxing & processing ({format_seconds(int(out_time_s))})..."
+
+        got_disp = format_size(total_size) if total_size else "-- MB"
+        job_manager.update_job(
+            job_id,
+            status="processing",
+            progress=99.0 if progress_status != 'end' else 99.5,
+            got=got_disp,
+            stage=stage_disp
+        )
+
+def create_ydl_opts(job_id: str, request: DownloadRequest, progress_port: Optional[int] = None) -> Dict[str, Any]:
     out_template = str(DOWNLOADS_DIR / f"{job_id}_%(title).100B.%(ext)s")
 
     def progress_hook(d: Dict[str, Any]):
@@ -57,8 +135,22 @@ def create_ydl_opts(job_id: str, request: DownloadRequest) -> Dict[str, Any]:
             speed = d.get('speed')
             eta = d.get('eta')
 
-            pct = (downloaded / total * 100.0) if total > 0 else 0.0
-            pct = min(99.0, max(0.0, pct)) # Reserve 100% for post-processing finish
+            info = d.get('info_dict', {})
+            vcodec = info.get('vcodec')
+            acodec = info.get('acodec')
+
+            raw_pct = (downloaded / total * 100.0) if total > 0 else 0.0
+
+            # Weight video stream 0..85%, audio stream 85..98% for multi-format downloads
+            if vcodec and vcodec != 'none':
+                pct = min(85.0, raw_pct * 0.85)
+                stream_label = "video"
+            elif acodec and acodec != 'none':
+                pct = min(98.0, 85.0 + (raw_pct * 0.13))
+                stream_label = "audio"
+            else:
+                pct = min(95.0, raw_pct * 0.95)
+                stream_label = "stream"
 
             speed_str = format_speed(speed)
             eta_str = format_eta(eta)
@@ -71,13 +163,13 @@ def create_ydl_opts(job_id: str, request: DownloadRequest) -> Dict[str, Any]:
                 speed=speed_str,
                 eta=eta_str,
                 got=got_str,
-                stage="Downloading stream payload"
+                stage=f"Downloading {stream_label} payload"
             )
         elif status == 'finished':
             job_manager.update_job(
                 job_id,
                 status="processing",
-                progress=99.0,
+                progress=98.5,
                 stage="Remuxing & processing media"
             )
 
@@ -101,8 +193,18 @@ def create_ydl_opts(job_id: str, request: DownloadRequest) -> Dict[str, Any]:
         'progress_hooks': [progress_hook],
         'postprocessor_hooks': [postprocessor_hook],
         'noplaylist': True,
+        'concurrent_fragment_downloads': 4,
+        'buffersize': 1024 * 1024,
         'extractor_args': {'youtube': {'player_client': ['web', 'default']}},
     }
+
+    if progress_port:
+        opts['external_downloader_args'] = {
+            'ffmpeg_o': ['-progress', f'tcp://127.0.0.1:{progress_port}']
+        }
+        opts['postprocessor_args'] = {
+            'ffmpeg': ['-progress', f'tcp://127.0.0.1:{progress_port}']
+        }
 
     # Time Trimming
     if request.trim and request.trim.end > request.trim.start:
@@ -129,6 +231,7 @@ def create_ydl_opts(job_id: str, request: DownloadRequest) -> Dict[str, Any]:
         # Soft Subtitles Embedding
         if request.subtitles and request.subtitles.embed and request.subtitles.lang:
             opts['writesubtitles'] = True
+            opts['writeautomaticsub'] = True
             opts['subtitleslangs'] = [request.subtitles.lang]
             postprocessors.append({'key': 'FFmpegEmbedSubtitle'})
 
@@ -160,6 +263,7 @@ def create_ydl_opts(job_id: str, request: DownloadRequest) -> Dict[str, Any]:
     elif request.mode == "srt":
         opts['skip_download'] = True
         opts['writesubtitles'] = True
+        opts['writeautomaticsub'] = True
         lang = request.subtitles.lang if request.subtitles and request.subtitles.lang else 'en'
         opts['subtitleslangs'] = [lang]
         opts['postprocessors'] = [
@@ -171,13 +275,13 @@ def create_ydl_opts(job_id: str, request: DownloadRequest) -> Dict[str, Any]:
 
     return opts
 
-def _sync_download(job_id: str, request: DownloadRequest):
-    opts = create_ydl_opts(job_id, request)
+def _sync_download(job_id: str, request: DownloadRequest, progress_port: Optional[int] = None):
+    opts = create_ydl_opts(job_id, request, progress_port)
     with yt_dlp.YoutubeDL(opts) as ydl:
         ydl.download([request.url])
 
 async def execute_download(job_id: str, request: DownloadRequest):
-    initial_stage = "Initializing stream connection"
+    initial_stage = "Connecting to media stream..."
     if request.trim and request.trim.end > request.trim.start:
         s_str = format_seconds(request.trim.start)
         e_str = format_seconds(request.trim.end)
@@ -186,8 +290,37 @@ async def execute_download(job_id: str, request: DownloadRequest):
     job_manager.update_job(job_id, status="extracting", stage=initial_stage)
     loop = asyncio.get_running_loop()
 
+    server = None
+    progress_port = None
     try:
-        await loop.run_in_executor(None, _sync_download, job_id, request)
+        async def handle_client(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
+            try:
+                curr_metrics: Dict[str, str] = {}
+                while line := await reader.readline():
+                    line_str = line.decode('utf-8', errors='ignore').strip()
+                    if '=' in line_str:
+                        k, v = line_str.split('=', 1)
+                        curr_metrics[k] = v
+                        if k == 'progress':
+                            _handle_ffmpeg_progress(job_id, request, curr_metrics)
+                            curr_metrics = {}
+            except Exception:
+                pass
+            finally:
+                try:
+                    writer.close()
+                    await writer.wait_closed()
+                except Exception:
+                    pass
+
+        server = await asyncio.start_server(handle_client, '127.0.0.1', 0)
+        progress_port = server.sockets[0].getsockname()[1]
+    except Exception:
+        server = None
+        progress_port = None
+
+    try:
+        await loop.run_in_executor(None, _sync_download, job_id, request, progress_port)
 
         # Locate completed files
         matching_files = list(DOWNLOADS_DIR.glob(f"{job_id}_*"))
@@ -241,3 +374,10 @@ async def execute_download(job_id: str, request: DownloadRequest):
         job_manager.update_job(job_id, status="error", error=f"Download failed: {err_msg}")
     except Exception as e:
         job_manager.update_job(job_id, status="error", error=f"Processing failed: {str(e)}")
+    finally:
+        if server:
+            server.close()
+            try:
+                await server.wait_closed()
+            except Exception:
+                pass

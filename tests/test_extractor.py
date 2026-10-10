@@ -68,3 +68,28 @@ def test_parse_metadata_resolution_and_audio():
     assert sub_en.is_auto is False
     sub_es = next(s for s in result.subtitles if s.lang == "es")
     assert sub_es.is_auto is True
+
+
+def test_sync_extract_info_opts(monkeypatch):
+    from unittest.mock import MagicMock
+    import yt_dlp
+    from app.services.extractor import _sync_extract_info
+
+    captured_opts = {}
+    class MockYoutubeDL:
+        def __init__(self, opts):
+            nonlocal captured_opts
+            captured_opts = opts
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            pass
+        def extract_info(self, url, download=False):
+            return {"title": "Mock Video", "formats": []}
+
+    monkeypatch.setattr(yt_dlp, "YoutubeDL", MockYoutubeDL)
+    res = _sync_extract_info("https://youtube.com/watch?v=mock")
+
+    assert res["title"] == "Mock Video"
+    assert captured_opts["skip_download"] is True
+    assert captured_opts["extractor_args"]["youtube"]["player_client"] == ["web", "default"]

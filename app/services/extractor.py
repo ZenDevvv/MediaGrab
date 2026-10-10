@@ -12,6 +12,7 @@ def _sync_extract_info(url: str) -> Dict[str, Any]:
         'quiet': True,
         'no_warnings': True,
         'noplaylist': True,
+        'extractor_args': {'youtube': {'player_client': ['web', 'default']}},
     }
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         return ydl.extract_info(url, download=False)

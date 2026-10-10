@@ -62,10 +62,11 @@
   </header>
 
   <!-- PWA Install Strip -->
-  <div class="install-strip" id="pwa-install-strip" hidden>
+  <!-- PWA Install Strip -->
+  <div class="strip" id="pwa-install-strip" hidden>
     <div class="l">
       <div class="appicon" aria-hidden="true"><svg viewBox="0 0 32 32"><use href="#clip"/></svg></div>
-      <span>Install MediaGrab to run offline & open from your dock or home screen.</span>
+      <span>Install MediaGrab to open it from your dock or home screen.</span>
     </div>
     <div class="r">
       <button class="btn btn-primary btn-sm" id="btn-pwa-install" type="button">Install</button>
@@ -79,27 +80,27 @@
     <!-- Screen 1: Paste URL -->
     <section class="view-screen active" id="view-paste">
       <div class="split-layout">
-        <div class="hero-box">
-          <h1 class="hero-title">Paste a link.<br>Get a file.</h1>
-          <p class="lead-text">From YouTube, Vimeo, TikTok, SoundCloud, X, Reddit and 1,750+ sites. Trim it, caption it, save it as MP4 or MP3.</p>
+        <div class="dhero">
+          <h2 class="hero-title">Paste a link.<br>Get a file.</h2>
+          <p class="lead-text">From YouTube, SoundCloud, TikTok, Vimeo, X, Reddit and about 1,750 other sites. Trim it, caption it, save it as MP4 or MP3.</p>
 
           <form id="form-inspect" class="field-wrap">
-            <div class="link-field" id="paste-input-container">
+            <div class="field lg" id="paste-input-container">
               <input id="input-url" type="url" placeholder="Paste a link" aria-label="Media URL" required autocomplete="off">
               <button class="btn btn-primary" id="btn-grab" type="submit">Grab</button>
             </div>
             <p class="err-line" id="inspect-error" hidden></p>
           </form>
 
-          <p class="mono">Press Enter to grab. Direct stream remuxing with zero ads.</p>
+          <p class="mono">Press Enter to grab. No ads, no tracking.</p>
         </div>
 
         <aside class="sidepanel" id="paste-recent-sidepanel">
           <div class="ph">
-            <h3>Recent files</h3>
-            <span class="mono">Local session</span>
+            <h3>Your files</h3>
+            <span class="mono">Cleared after 30 min</span>
           </div>
-          <div id="sidepanel-history-list" class="file-cards">
+          <div id="sidepanel-history-list" class="recent-list">
             <p class="mono" style="padding: 12px 0;">No downloads yet. Paste a link to get started.</p>
           </div>
         </aside>
@@ -109,22 +110,40 @@
     <!-- Screen 2: Choose Configuration -->
     <section class="view-screen" id="view-choose">
       <div class="split-layout">
-        <div style="display: flex; flex-direction: column; gap: 20px;">
-          <!-- Media Header -->
-          <div class="media-header">
-            <div class="media-thumb">
-              <img id="choose-thumb-img" src="" alt="Thumbnail" style="display:none;">
-              <svg id="choose-thumb-ph" viewBox="0 0 160 90" aria-hidden="true"><use href="#thumb-ph"/></svg>
-              <span class="dur" id="choose-duration">0:00</span>
-            </div>
-            <div class="media-info">
-              <h2 id="choose-title" style="font-size: 20px;">Title</h2>
-              <p id="choose-uploader">Channel</p>
-            </div>
+        <!-- Left: Media Player & Inline Trim -->
+        <div class="dleft">
+          <div class="player">
+            <img id="choose-thumb-img" src="" alt="Thumbnail" style="display:none;">
+            <svg id="choose-thumb-ph" viewBox="0 0 160 90" aria-hidden="true"><use href="#thumb-ph"/></svg>
+            <span class="play" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7 4.5v15l12-7.5z"/></svg></span>
+            <span class="dur" id="choose-duration">0:00</span>
           </div>
+          <div>
+            <h2 class="dtitle" id="choose-title">Title</h2>
+            <p class="dsub" id="choose-uploader">Channel</p>
+          </div>
+          <div>
+            <div class="sec-title">Trim</div>
+            <div class="wavebox">
+              <div class="wave tall">
+                <div class="bars" id="trim-bars-container" aria-hidden="true"></div>
+                <input class="rng" id="trim-s" type="range" min="0" max="100" step="1" value="0" aria-label="Start time">
+                <input class="rng" id="trim-e" type="range" min="0" max="100" step="1" value="100" aria-label="End time">
+              </div>
+              <div class="ruler"><span id="ruler-start">0:00</span><span id="ruler-end">0:00</span></div>
+            </div>
+            <div class="times3">
+              <div class="tf"><label for="t-start">Start</label><input id="t-start" class="v" type="text" inputmode="numeric" value="00:00"></div>
+              <div class="tf"><label for="t-end">End</label><input id="t-end" class="v" type="text" inputmode="numeric" value="00:00"></div>
+              <div class="tf"><label>Clip</label><div class="v" id="t-clip-display">0:00 <small id="t-clip-total">of 0:00</small></div></div>
+            </div>
+            <p class="err-line" id="trim-error" hidden>Invalid timestamp format. Use mm:ss or hh:mm:ss.</p>
+          </div>
+        </div>
 
-          <!-- Format Switch -->
-          <nav class="fmt-switch" aria-label="Format selection">
+        <!-- Right: Interactive Configuration Sidepanel -->
+        <aside class="sidepanel">
+          <nav class="fmt" aria-label="Format selection">
             <button class="fmt-btn active" id="btn-fmt-video" type="button">Video<small>MP4</small></button>
             <button class="fmt-btn" id="btn-fmt-audio" type="button">Audio<small>MP3</small></button>
           </nav>
@@ -135,7 +154,7 @@
             <div class="chips" id="video-qualities-grid">
               <!-- Dynamically populated chips -->
             </div>
-            <p class="legend" id="video-legend">Remux copies the stream into an MP4 in seconds. Encode converts it first.</p>
+            <p class="legend" id="video-legend">Sizes are for your clip. Remux takes seconds. Encode takes longer.</p>
           </div>
 
           <!-- Audio Options Pane -->
@@ -178,42 +197,38 @@
                 <span class="sz" id="audio-sz-128">-- MB</span>
               </div>
             </div>
+
+            <p class="mono" style="margin-top: 12px; display: flex; align-items: center; gap: 6px;">
+              <svg class="ico" style="width:14px;height:14px;" viewBox="0 0 24 24"><path d="M20.6 13.4l-7.2 7.2a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1"/></svg>
+              Artist, title and year are tagged. The thumbnail becomes cover art.
+            </p>
           </div>
 
-          <!-- Step Links: Trim & Subtitles -->
-          <div class="setrows">
-            <div class="setrow" id="row-open-trim">
-              <span class="si"><svg class="ico" viewBox="0 0 24 24"><use href="#i-scissors"/></svg></span>
+          <!-- Subtitles Section (Inline) -->
+          <div id="section-subtitles">
+            <div class="sec-title">Subtitles</div>
+            <div class="srow" id="row-subs-track">
               <div>
-                <b>Trim</b>
-                <span class="sv" id="trim-summary-text">Whole video</span>
+                <b id="subs-track-name">English</b>
+                <span class="sv" id="subs-track-desc">Written by the creator</span>
               </div>
-              <svg class="ico chev" viewBox="0 0 24 24"><use href="#i-chev"/></svg>
+              <button class="btn btn-sm" id="btn-save-srt-instant" type="button"><span>Save .srt</span></button>
             </div>
-
-            <div class="setrow" id="row-open-subtitles">
-              <span class="si"><svg class="ico" viewBox="0 0 24 24"><use href="#i-captions"/></svg></span>
+            <div class="srow" id="row-subs-embed">
               <div>
-                <b>Subtitles & Captions</b>
-                <span class="sv" id="subs-summary-text">None</span>
+                <b>Embed in the MP4</b>
+                <span class="sv">Caption track you can switch on</span>
               </div>
-              <svg class="ico chev" viewBox="0 0 24 24"><use href="#i-chev"/></svg>
+              <label class="switch">
+                <input type="checkbox" id="check-embed-subs" role="switch" checked aria-label="Embed captions in the MP4">
+                <span class="ui"></span>
+              </label>
             </div>
           </div>
-        </div>
 
-        <!-- Desktop Action Panel -->
-        <aside class="sidepanel">
-          <div class="ph">
-            <h3>Configuration</h3>
-            <span class="mono" id="config-badge-mode">MP4</span>
-          </div>
-          <div style="display: grid; gap: 8px;">
-            <p class="mono" id="config-summary-clip">Clip: Whole video</p>
-            <p class="mono" id="config-summary-details">Quality: 1080p</p>
-            <p class="mono" id="config-summary-captions">Captions: None</p>
-          </div>
-          <div style="margin-top: auto; display: flex; flex-direction: column; gap: 10px;">
+          <!-- Summary & Actions -->
+          <div class="summary">
+            <p class="mono" id="config-summary-spec">MP4 · 1080p · Whole video</p>
             <button class="btn btn-primary btn-block" id="btn-start-download" type="button">
               <span id="btn-download-label">Grab MP4</span>
             </button>
