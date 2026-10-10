@@ -93,9 +93,13 @@ a { color: inherit; text-decoration: none; }
 :focus-visible { outline: 2px solid var(--sel); outline-offset: 3px; border-radius: 6px; }
 [hidden] { display: none !important; }
 
-/* SVG binder clip and icons */
+/* SVG binder clip, brand mark, and icons */
 svg .clip-body { fill: var(--accent); stroke: var(--ink); stroke-width: 2; stroke-linejoin: round; }
 svg .clip-wire { fill: none; stroke: var(--ink); stroke-width: 2; stroke-linecap: round; }
+svg .mark-bracket-outer { stroke: var(--ink); }
+svg .mark-bracket-inner { stroke: var(--accent); }
+svg .mark-play { fill: var(--ink); stroke: var(--ink); }
+svg .mark-wordmark { fill: var(--ink); }
 svg .t-fill { fill: var(--accent); }
 svg .t-hill-b { fill: var(--line); }
 svg .t-hill-f { fill: var(--ink); fill-opacity: 0.12; }
@@ -115,6 +119,9 @@ svg .t-hill-f { fill: var(--ink); fill-opacity: 0.12; }
 }
 .appicon svg { width: calc(var(--s) * 0.7); height: calc(var(--s) * 0.7); }
 .appicon svg .clip-body { fill: var(--card); }
+.appicon svg .mark-bracket-outer { stroke: #13171B; }
+.appicon svg .mark-bracket-inner { stroke: #FFFFFF; }
+.appicon svg .mark-play { fill: #13171B; stroke: #13171B; }
 
 /* Buttons */
 .btn {
@@ -198,7 +205,22 @@ svg .t-hill-f { fill: var(--ink); fill-opacity: 0.12; }
   font: 800 22px var(--font-display);
   letter-spacing: -0.01em;
 }
-.brand svg { width: 30px; height: 30px; }
+.brand-logo {
+  height: 28px;
+  width: auto;
+  display: block;
+}
+.brand-logo-dark { display: none; }
+.brand-logo-light { display: block; }
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .brand-logo-light { display: none; }
+  :root:not([data-theme="light"]) .brand-logo-dark { display: block; }
+}
+
+:root[data-theme="dark"] .brand-logo-light { display: none; }
+:root[data-theme="dark"] .brand-logo-dark { display: block; }
+
 .nav-actions { display: flex; gap: 10px; align-items: center; }
 .navlink {
   display: inline-flex;
@@ -680,9 +702,27 @@ svg .t-hill-f { fill: var(--ink); fill-opacity: 0.12; }
 
 .track { position: relative; margin-top: 24px; }
 .track .clipper {
-  position: absolute; top: -22px; left: 0%; width: 24px; height: 24px;
-  margin-left: -12px; transition: left 0.15s ease-out;
+  position: absolute; top: -24px; left: 0%; width: 26px; height: 26px;
+  margin-left: -13px; transition: left 0.15s ease-out;
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.15));
+  display: flex; align-items: center; justify-content: center;
 }
+.clipper-mark {
+  width: 26px;
+  height: 26px;
+  display: block;
+}
+.clipper-dark { display: none; }
+.clipper-light { display: block; }
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .clipper-light { display: none; }
+  :root:not([data-theme="light"]) .clipper-dark { display: block; }
+}
+
+:root[data-theme="dark"] .clipper-light { display: none; }
+:root[data-theme="dark"] .clipper-dark { display: block; }
+
 .track .bar-bg { height: 16px; border-radius: 999px; border: 1.5px solid var(--edge); background: var(--card); overflow: hidden; position: relative; }
 .track .bar-fill { height: 100%; width: 0%; background: var(--accent); border-right: 1.5px solid var(--pop); transition: width 0.15s ease-out; }
 

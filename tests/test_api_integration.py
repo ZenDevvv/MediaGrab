@@ -32,6 +32,15 @@ async def test_pwa_root_endpoints():
         assert resp.status_code == 200
         assert "CACHE_NAME" in resp.text
 
+        # Favicons
+        resp = await client.get("/favicon.svg")
+        assert resp.status_code == 200
+        assert resp.headers["content-type"].startswith("image/svg+xml")
+
+        resp = await client.get("/favicon.ico")
+        assert resp.status_code == 200
+        assert resp.headers["content-type"].startswith("image/x-icon")
+
 @pytest.mark.asyncio
 async def test_api_download_and_progress_flow():
     transport = ASGITransport(app=app)

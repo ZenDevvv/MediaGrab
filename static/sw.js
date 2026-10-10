@@ -1,4 +1,4 @@
-const CACHE_NAME = 'mediagrab-shell-v2';
+const CACHE_NAME = 'mediagrab-shell-v4';
 
 const STATIC_ASSETS = [
   '/',
@@ -9,9 +9,16 @@ const STATIC_ASSETS = [
   '/js/app.js',
   '/manifest.webmanifest',
   '/icons/favicon.svg',
+  '/icons/favicon.ico',
+  '/icons/apple-touch-icon-180.png',
   '/icons/icon-192.png',
   '/icons/icon-512.png',
-  '/icons/icon-maskable.png'
+  '/icons/icon-maskable-512.png',
+  '/icons/icon-maskable.png',
+  '/icons/mediagrab-lockup@2x.png',
+  '/icons/mediagrab-lockup-on-dark@2x.png',
+  '/icons/mediagrab-mark.svg',
+  '/icons/mediagrab-mark-on-dark.svg'
 ];
 
 self.addEventListener('install', (event) => {

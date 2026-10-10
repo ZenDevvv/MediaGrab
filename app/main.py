@@ -69,6 +69,13 @@ async def serve_favicon():
         media_type="image/svg+xml"
     )
 
+@app.get("/favicon.ico", include_in_schema=False)
+async def serve_favicon_ico():
+    return FileResponse(
+        STATIC_DIR / "icons" / "favicon.ico",
+        media_type="image/x-icon"
+    )
+
 # Root SPA endpoints
 @app.get("/", include_in_schema=False)
 async def serve_index():

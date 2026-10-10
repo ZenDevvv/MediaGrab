@@ -94,10 +94,13 @@ MediaGrab/
 │   ├── js/
 │   │   └── app.js           # Native JS controller (SPA state, trim, SSE, storage)
 │   └── icons/
-│       ├── icon-192.png     # PWA standard icon (binder clip mark)
+│       ├── icon-192.png     # PWA standard icon
 │       ├── icon-512.png     # PWA high-res icon
-│       ├── icon-maskable.png# PWA maskable adaptive icon
-│       └── favicon.svg      # SVG vector favicon
+│       ├── icon-maskable-512.png # PWA maskable adaptive icon
+│       ├── favicon.svg      # SVG vector favicon
+│       ├── favicon.ico      # Multi-resolution ICO favicon
+│       ├── apple-touch-icon-180.png # iOS home screen icon
+│       └── mediagrab-*.svg  # Brand marks, lockups, and wordmark
 ├── downloads/               # Ephemeral storage directory (ignored in git)
 ├── DESIGN.md                # Design system specification
 ├── MediaGrab.html           # Original prototype & design mockup
@@ -134,9 +137,9 @@ The client interface implements a deterministic, hash-optional view state model:
   - `display`: `"standalone"`
   - `background_color`: `"#101722"` (dark) / `"#F5F7F8"` (light)
   - `theme_color`: Follows color scheme via dynamic JS update and dual `<meta name="theme-color">` elements.
-  - Icons: 192x192, 512x512, and 512x512 maskable with the official binder clip insignia.
+  - Icons: 192x192, 512x512, and 512x512 maskable with the official two-bracket play mark.
 - **Service Worker Lifecycle (`sw.js`):**
-  - **Cache Name:** `mediagrab-shell-v1`
+  - **Cache Name:** `mediagrab-shell-v4`
   - **Pre-cached Assets:** `/`, `/css/app.css`, `/js/app.js`, `/manifest.webmanifest`, SVG symbols, and Google Fonts (`DM Mono`, `Gabarito`, `Onest`).
   - **Network-Only Bypass:** `/api/*` and any media stream routes (`/api/file/*`) explicitly bypass service worker cache to prevent quota exhaustion and memory stalls.
   - **Offline Fallback:** If network fetch fails on navigation or API requests, the controller transitions into the styled `OFFLINE` view.
