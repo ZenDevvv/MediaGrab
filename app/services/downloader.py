@@ -77,6 +77,7 @@ def create_ydl_opts(job_id: str, request: DownloadRequest) -> Dict[str, Any]:
         'no_warnings': True,
         'progress_hooks': [progress_hook],
         'noplaylist': True,
+        'extractor_args': {'youtube': {'player_client': ['web', 'default']}},
     }
 
     # Time Trimming
@@ -91,10 +92,11 @@ def create_ydl_opts(job_id: str, request: DownloadRequest) -> Dict[str, Any]:
         height_map = {"2160p": 2160, "1440p": 1440, "1080p": 1080, "720p": 720, "480p": 480, "360p": 360}
         max_h = height_map.get(request.quality or "1080p", 1080)
 
-        # Prioritize AVC1 / MP4 direct remux, fallback to best within resolution
+        # Compatible MP4 video & M4A audio, fallback to best within resolution
         opts['format'] = (
-            f"bestvideo[height<={max_h}][vcodec^=avc1][ext=mp4]+bestaudio[ext=m4a]/"
+            f"bestvideo[height<={max_h}][ext=mp4]+bestaudio[ext=m4a]/"
             f"bestvideo[height<={max_h}]+bestaudio/"
+            f"best[height<={max_h}][ext=mp4]/"
             f"best[height<={max_h}]/best"
         )
         opts['merge_output_format'] = 'mp4'
