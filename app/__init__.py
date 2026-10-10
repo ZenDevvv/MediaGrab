@@ -1,0 +1,1 @@
+"""MediaGrab application package."""

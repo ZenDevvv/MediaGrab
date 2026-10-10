@@ -1,0 +1,1363 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>MediaGrab</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Gabarito:wght@500;600;700;800&family=Onest:wght@400;500;600&display=swap">
+<style>
+/* Layout: a review board of nine app screens in a wrapping grid. Each screen is one narrow column, because the app is an
+   installable web app (PWA) first and a phone-width column also centers cleanly on desktop. Boldness lives in one place:
+   a marigold binder clip and a hard-edged button shadow. Everything else stays flat and quiet. */
+:root {
+  --font-display: 'Gabarito', ui-rounded, 'Nunito', system-ui, sans-serif;
+  --font-body: 'Onest', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'DM Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+  --board: #DCE2E7;
+  --bg: #F5F7F8;
+  --card: #FFFFFF;
+  --ink: #13171B;
+  --muted: #566069;
+  --line: #CBD3DA;
+  --edge: #13171B;
+  --soft: #E8ECEF;
+  --accent: #FFC93C;
+  --accent-ink: #13171B;
+  --accent-soft: #FFF0BF;
+  --pop: #13171B;
+  --sel: #13171B;
+  --ok: #1B7F54;
+  --bad: #B8341F;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --board: #080C12;
+    --bg: #101722;
+    --card: #172131;
+    --ink: #EAF0F6;
+    --muted: #9AA8B8;
+    --line: #2A384C;
+    --edge: #5A6B82;
+    --soft: #1E2B3F;
+    --accent: #FFC93C;
+    --accent-ink: #13171B;
+    --accent-soft: #3A3218;
+    --pop: #05080C;
+    --sel: #FFC93C;
+    --ok: #5FD3A0;
+    --bad: #FF8F7C;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --board: #080C12;
+  --bg: #101722;
+  --card: #172131;
+  --ink: #EAF0F6;
+  --muted: #9AA8B8;
+  --line: #2A384C;
+  --edge: #5A6B82;
+  --soft: #1E2B3F;
+  --accent: #FFC93C;
+  --accent-ink: #13171B;
+  --accent-soft: #3A3218;
+  --pop: #05080C;
+  --sel: #FFC93C;
+  --ok: #5FD3A0;
+  --bad: #FF8F7C;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html { scroll-padding-top: 16px; }
+@media (prefers-reduced-motion: no-preference) { html { scroll-behavior: smooth; } }
+body {
+  background: var(--board);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 15px;
+  line-height: 1.5;
+  padding-inline: 16px;
+  padding-block: 32px 64px;
+  -webkit-font-smoothing: antialiased;
+}
+h1, h2, h3, p { margin: 0; }
+h1, h2 { text-wrap: balance; font-family: var(--font-display); }
+a { color: inherit; }
+:focus-visible { outline: 2px solid var(--sel); outline-offset: 3px; border-radius: 6px; }
+[hidden] { display: none !important; }
+
+.page { max-width: 1160px; margin-inline: auto; display: flex; flex-direction: column; gap: 32px; }
+
+/* Board header */
+.top { display: flex; flex-wrap: wrap; gap: 16px 32px; align-items: flex-end; justify-content: space-between; }
+.top h1 { font-size: 40px; font-weight: 800; line-height: 1; letter-spacing: -0.01em; }
+.top p { color: var(--muted); max-width: 60ch; margin-top: 10px; }
+.seg { display: inline-flex; padding: 3px; gap: 2px; background: var(--bg); border: 1.5px solid var(--line); border-radius: 999px; }
+.seg button {
+  font: 500 13px var(--font-body); color: var(--muted); background: transparent; border: 0;
+  height: 32px; padding: 0 14px; border-radius: 999px; cursor: pointer; display: inline-flex; align-items: center;
+}
+.seg [aria-pressed="true"] { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+
+/* Board */
+.board { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 330px), 1fr)); gap: 32px 24px; }
+.screen { display: flex; flex-direction: column; gap: 10px; min-width: 0; scroll-margin-top: 16px; }
+.label { font: 500 12px var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); display: flex; justify-content: space-between; gap: 12px; }
+
+.app {
+  flex: 1; background: var(--bg); border: 1.5px solid var(--line); border-radius: 22px;
+  padding: 20px; min-height: 640px; display: flex; flex-direction: column; gap: 20px; min-width: 0;
+}
+.bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.bar .left { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.bar h3 { font: 800 22px var(--font-display); letter-spacing: -0.01em; }
+.brand { display: inline-flex; align-items: center; gap: 8px; font: 800 20px var(--font-display); letter-spacing: -0.01em; }
+.brand svg { width: 28px; height: 28px; }
+.icon-btn {
+  width: 36px; height: 36px; border-radius: 50%; border: 1.5px solid var(--line); background: var(--card); color: var(--ink);
+  display: grid; place-items: center; cursor: pointer; padding: 0; text-decoration: none; flex: none;
+}
+.icon-btn:hover { border-color: var(--edge); }
+.icon-btn svg { width: 18px; height: 18px; }
+.ico-sun { display: none; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .ico-sun { display: block; }
+  :root:not([data-theme="light"]) .ico-moon { display: none; }
+}
+:root[data-theme="dark"] .ico-sun { display: block; }
+:root[data-theme="dark"] .ico-moon { display: none; }
+
+svg .clip-body { fill: var(--accent); stroke: var(--ink); stroke-width: 2; stroke-linejoin: round; }
+svg .clip-wire { fill: none; stroke: var(--ink); stroke-width: 2; stroke-linecap: round; }
+svg .t-fill { fill: var(--accent); }
+svg .t-hill-b { fill: var(--line); }
+svg .t-hill-f { fill: var(--ink); fill-opacity: 0.12; }
+
+.ico { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+/* PWA icon */
+.appicon { --s: 44px; width: var(--s); height: var(--s); border-radius: calc(var(--s) * 0.27); background: var(--accent); border: 1.5px solid var(--pop); display: grid; place-items: center; flex: none; }
+.appicon svg { width: calc(var(--s) * 0.7); height: calc(var(--s) * 0.7); }
+.appicon svg .clip-body { fill: var(--card); }
+
+/* Buttons */
+.btn {
+  font: 600 15px var(--font-body); display: inline-flex; align-items: center; justify-content: center; gap: 8px; text-decoration: none;
+  height: 48px; padding: 0 22px; border-radius: 999px; border: 1.5px solid var(--edge); background: var(--card); color: var(--ink); cursor: pointer;
+}
+.btn:hover { border-color: var(--ink); }
+.btn svg { width: 18px; height: 18px; }
+.btn-primary { background: var(--accent); color: var(--accent-ink); border-color: var(--pop); box-shadow: 3px 3px 0 var(--pop); transition: transform 0.1s, box-shadow 0.1s; }
+.btn-primary:hover { border-color: var(--pop); transform: translate(1px, 1px); box-shadow: 2px 2px 0 var(--pop); }
+.btn-primary:active { transform: translate(3px, 3px); box-shadow: 0 0 0 var(--pop); }
+.btn-block { width: 100%; }
+.btn-quiet { border-color: transparent; background: transparent; color: var(--muted); }
+.btn-quiet:hover { color: var(--ink); border-color: transparent; }
+.btn-sm { height: 38px; padding: 0 16px; font-size: 14px; }
+.foot { margin-top: auto; display: flex; flex-direction: column; gap: 10px; }
+
+/* Home */
+.hero h2 { font-size: 40px; font-weight: 800; line-height: 1.02; letter-spacing: -0.015em; }
+.hero p { color: var(--muted); margin-top: 12px; max-width: 36ch; }
+.field {
+  display: flex; align-items: center; gap: 8px; background: var(--card); border: 1.5px solid var(--edge);
+  border-radius: 999px; padding: 6px 6px 6px 18px;
+}
+.field input { flex: 1; min-width: 0; background: transparent; border: 0; outline: 0; font: 400 15px var(--font-body); color: var(--ink); height: 40px; }
+.field input::placeholder { color: var(--muted); }
+.field:focus-within { border-color: var(--sel); box-shadow: 0 0 0 3px var(--accent-soft); }
+.field .btn { height: 40px; padding: 0 18px; }
+.field.bad { border-color: var(--bad); }
+.field.bad input { color: var(--ink); text-decoration: underline wavy var(--bad); text-underline-offset: 4px; }
+.err-line { color: var(--bad); font-size: 13px; padding-inline: 18px; margin-top: 10px; }
+.stage { display: grid; place-items: center; padding-block: 0; }
+.stage svg { width: min(100%, 230px); height: auto; }
+.stage text { font-family: var(--font-display); font-weight: 800; }
+.stage .card-a { fill: var(--accent-soft); stroke: var(--edge); stroke-width: 1.5; }
+.stage .card-b { fill: var(--card); stroke: var(--edge); stroke-width: 1.5; }
+.stage .txt { fill: var(--ink); }
+.mono { font-family: var(--font-mono); font-size: 12px; color: var(--muted); line-height: 1.6; }
+.dot-live { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--ok); margin-right: 8px; }
+
+.install { border: 1.5px solid var(--line); background: var(--card); border-radius: 16px; padding: 14px; display: grid; gap: 12px; }
+.install .r1 { display: flex; gap: 12px; align-items: center; }
+.install b { display: block; font: 700 16px var(--font-display); }
+.install p { font-size: 13px; color: var(--muted); }
+.install .r2 { display: flex; gap: 8px; align-items: center; }
+
+/* Media summary */
+.media { display: grid; grid-template-columns: 104px minmax(0, 1fr); gap: 14px; align-items: center; }
+.thumb { position: relative; aspect-ratio: 16 / 9; border-radius: 12px; overflow: hidden; background: var(--soft); border: 1.5px solid var(--line); }
+.thumb svg { display: block; width: 100%; height: 100%; }
+.thumb .dur { position: absolute; right: 5px; bottom: 5px; font: 500 11px var(--font-mono); background: var(--ink); color: var(--bg); padding: 1px 6px; border-radius: 6px; }
+.media h3 { font: 700 17px/1.2 var(--font-display); text-wrap: balance; }
+.media p { color: var(--muted); font-size: 13px; margin-top: 4px; }
+
+/* Segmented format switch */
+.fmt { display: grid; grid-template-columns: 1fr 1fr; padding: 4px; gap: 4px; background: var(--soft); border-radius: 999px; }
+.fmt a { text-align: center; text-decoration: none; height: 40px; display: grid; place-items: center; border-radius: 999px; font: 700 15px var(--font-display); color: var(--muted); }
+.fmt a:hover { color: var(--ink); }
+.fmt a[aria-current="true"] { background: var(--card); color: var(--ink); box-shadow: 0 0 0 1.5px var(--sel); }
+.fmt small { font: 500 11px var(--font-mono); margin-left: 6px; opacity: 0.8; }
+
+.sec-title { font: 500 12px var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); margin-bottom: 10px; }
+
+/* Radio chips and rows */
+form { display: contents; }
+.opt input { position: absolute; opacity: 0; pointer-events: none; }
+.opt { display: block; min-width: 0; position: relative; }
+.chips { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.chip { display: grid; gap: 3px; padding: 11px 12px; border: 1.5px solid var(--line); border-radius: 14px; background: var(--card); cursor: pointer; height: 100%; }
+.chip b { font: 700 17px var(--font-display); }
+.chip i { font: 400 12px var(--font-mono); color: var(--muted); font-style: normal; }
+.tag { font: 500 11px var(--font-mono); padding: 1px 7px; border-radius: 999px; justify-self: start; margin-top: 3px; }
+.tag.fast { background: var(--accent-soft); color: var(--ink); }
+.tag.slow { background: var(--soft); color: var(--muted); }
+.opt:hover .chip, .opt:hover .row { border-color: var(--edge); }
+.opt input:checked + .chip, .opt input:checked + .row { border-color: var(--sel); box-shadow: 0 0 0 1.5px var(--sel); background: var(--card); }
+.opt input:focus-visible + .chip, .opt input:focus-visible + .row { outline: 2px solid var(--sel); outline-offset: 3px; }
+.legend { color: var(--muted); font-size: 13px; margin-top: 10px; }
+
+.rows { display: grid; gap: 8px; }
+.row { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 12px 14px; border: 1.5px solid var(--line); border-radius: 14px; background: var(--card); cursor: pointer; }
+.row .dot { width: 20px; height: 20px; border-radius: 50%; border: 1.5px solid var(--edge); }
+.opt input:checked + .row .dot { background: var(--accent); border-color: var(--sel); box-shadow: inset 0 0 0 3px var(--card); }
+.row .nm { font: 700 16px var(--font-display); display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.row .nm span { font: 400 12px var(--font-mono); color: var(--muted); }
+.row .ds { font-size: 13px; color: var(--muted); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.row .sz { font: 400 13px var(--font-mono); font-variant-numeric: tabular-nums; }
+.pill { font: 600 11px var(--font-body); padding: 1px 8px; border-radius: 999px; background: var(--accent); color: var(--accent-ink); }
+
+/* Setting rows that open a step */
+.setrows { display: grid; gap: 8px; }
+.setrow { display: grid; grid-template-columns: 36px minmax(0, 1fr) 16px; gap: 12px; align-items: center; padding: 10px 14px 10px 10px; border: 1.5px solid var(--line); border-radius: 14px; background: var(--card); text-decoration: none; color: inherit; }
+.setrow:hover { border-color: var(--edge); }
+.setrow .si { width: 36px; height: 36px; border-radius: 10px; background: var(--soft); display: grid; place-items: center; }
+.setrow .si svg { width: 18px; height: 18px; }
+.setrow b { display: block; font: 700 15px var(--font-display); line-height: 1.2; }
+.setrow .sv { display: block; font: 400 12px var(--font-mono); color: var(--muted); overflow-wrap: anywhere; margin-top: 2px; }
+.setrow .chev { width: 16px; height: 16px; color: var(--muted); }
+
+/* Source bitrate scale */
+.src { background: var(--card); border: 1.5px solid var(--line); border-radius: 14px; padding: 12px 14px 10px; }
+.src p { font-size: 13px; color: var(--muted); }
+.src p b { color: var(--ink); font-weight: 600; }
+.scale { position: relative; height: 54px; margin: 6px 12px 0; }
+.scale .ln { position: absolute; left: 0; right: 0; top: 26px; height: 2px; background: var(--line); border-radius: 2px; }
+.scale .tk { position: absolute; top: 20px; width: 2px; height: 14px; background: var(--edge); transform: translateX(-1px); }
+.scale .tl { position: absolute; top: 36px; font: 400 11px var(--font-mono); color: var(--muted); transform: translateX(-50%); }
+.scale .tl.end { transform: translateX(-100%); }
+.scale .mk { position: absolute; top: 19px; width: 16px; height: 16px; margin-left: -8px; border-radius: 50%; background: var(--accent); border: 1.5px solid var(--pop); }
+.scale .ml { position: absolute; top: -2px; left: 0; font: 500 11px var(--font-mono); color: var(--ink); transform: translateX(-12px); white-space: nowrap; }
+.tags-line { font-size: 13px; color: var(--muted); display: flex; gap: 8px; align-items: center; }
+.tags-line svg { width: 16px; height: 16px; flex: none; }
+
+/* Trim */
+.wavebox { background: var(--card); border: 1.5px solid var(--line); border-radius: 16px; padding: 14px; }
+.wave { position: relative; height: 72px; }
+.bars { position: absolute; inset: 0; display: flex; align-items: center; gap: 2px; padding-inline: 7px; }
+.bars i { flex: 1; min-width: 0; border-radius: 2px; background: var(--line); }
+.bars i.on { background: var(--ink); }
+.rng { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; background: transparent; pointer-events: none; -webkit-appearance: none; appearance: none; }
+.rng::-webkit-slider-runnable-track { height: 72px; background: transparent; }
+.rng::-moz-range-track { height: 72px; background: transparent; }
+.rng::-webkit-slider-thumb { -webkit-appearance: none; pointer-events: auto; width: 14px; height: 72px; border-radius: 7px; background: var(--accent); border: 1.5px solid var(--pop); cursor: ew-resize; }
+.rng::-moz-range-thumb { pointer-events: auto; width: 11px; height: 69px; border-radius: 7px; background: var(--accent); border: 1.5px solid var(--pop); cursor: ew-resize; }
+.rng:focus-visible { outline: none; }
+.rng:focus-visible::-webkit-slider-thumb { outline: 2px solid var(--sel); outline-offset: 3px; }
+.rng:focus-visible::-moz-range-thumb { outline: 2px solid var(--sel); outline-offset: 3px; }
+.ruler { display: flex; justify-content: space-between; font: 400 11px var(--font-mono); color: var(--muted); margin-top: 8px; }
+.times { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.tf { display: grid; gap: 4px; background: var(--card); border: 1.5px solid var(--line); border-radius: 14px; padding: 10px 14px; }
+.tf label { font: 500 11px var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.tf input { background: transparent; border: 0; outline: 0; font: 500 24px var(--font-mono); color: var(--ink); width: 100%; padding: 0; font-variant-numeric: tabular-nums; }
+.tf:focus-within { border-color: var(--sel); box-shadow: 0 0 0 3px var(--accent-soft); }
+.durline { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.durline b { font: 800 56px/1 var(--font-display); font-variant-numeric: tabular-nums; letter-spacing: -0.02em; }
+.durline span { color: var(--muted); }
+.save-note { color: var(--muted); font-size: 14px; margin-top: 6px; }
+.msg { color: var(--bad); font-size: 13px; }
+
+/* Subtitles */
+.panel { background: var(--card); border: 1.5px solid var(--line); border-radius: 16px; padding: 14px; display: grid; gap: 12px; }
+.panel .ph { display: flex; gap: 12px; align-items: center; justify-content: space-between; }
+.panel h3 { font: 700 16px var(--font-display); }
+.panel p { font-size: 13px; color: var(--muted); margin-top: 2px; }
+.cues { background: var(--soft); border-radius: 12px; padding: 12px; margin: 0; font: 400 12px/1.65 var(--font-mono); color: var(--ink); overflow-x: auto; }
+.switch { position: relative; display: inline-block; width: 48px; height: 28px; flex: none; }
+.switch input { position: absolute; inset: 0; opacity: 0; margin: 0; cursor: pointer; width: 100%; height: 100%; }
+.switch .ui { position: absolute; inset: 0; border-radius: 999px; background: var(--soft); border: 1.5px solid var(--edge); pointer-events: none; transition: background 0.15s; }
+.switch .ui::after { content: ""; position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; border-radius: 50%; background: var(--card); border: 1.5px solid var(--edge); transition: transform 0.15s; }
+.switch input:checked + .ui { background: var(--accent); border-color: var(--pop); }
+.switch input:checked + .ui::after { transform: translateX(20px); border-color: var(--pop); }
+.switch input:focus-visible + .ui { outline: 2px solid var(--sel); outline-offset: 3px; }
+@media (prefers-reduced-motion: reduce) { .switch .ui, .switch .ui::after { transition: none; } }
+
+/* Progress */
+.pct { font: 800 64px/1 var(--font-display); letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+.pct small { font-size: 28px; font-weight: 700; color: var(--muted); margin-left: 2px; }
+.track { position: relative; margin-top: 22px; }
+.track .clipper { position: absolute; top: -22px; left: 62%; width: 24px; height: 24px; margin-left: -12px; }
+.track .bar-bg { height: 16px; border-radius: 999px; border: 1.5px solid var(--edge); background: var(--card); overflow: hidden; }
+.track .bar-fill { height: 100%; width: 62%; background: var(--accent); border-right: 1.5px solid var(--pop); }
+.stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.stat { background: var(--card); border: 1.5px solid var(--line); border-radius: 14px; padding: 10px 12px; }
+.stat span { display: block; font: 500 11px var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.stat b { font: 500 14px var(--font-mono); font-variant-numeric: tabular-nums; }
+.steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 11px; }
+.steps li { display: flex; gap: 12px; align-items: center; }
+.steps .st { width: 22px; height: 22px; border-radius: 50%; border: 1.5px solid var(--line); display: grid; place-items: center; flex: none; }
+.steps .st svg { width: 12px; height: 12px; }
+.steps .done .st { background: var(--accent); border-color: var(--pop); color: var(--accent-ink); }
+.steps .now .st { border-color: var(--sel); }
+.steps .now .st::after { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); border: 1.5px solid var(--pop); }
+.steps .todo { color: var(--muted); }
+.steps .now { font-weight: 600; }
+
+/* Done, error, offline */
+.badge { width: 56px; height: 56px; border-radius: 50%; display: grid; place-items: center; border: 1.5px solid var(--pop); }
+.badge svg { width: 26px; height: 26px; }
+.badge.good { background: var(--accent); color: var(--accent-ink); }
+.badge.warn { background: var(--card); color: var(--bad); border-color: var(--bad); }
+.badge.off { background: var(--soft); color: var(--ink); border-color: var(--edge); }
+.head2 h2 { font-size: 34px; font-weight: 800; line-height: 1.05; letter-spacing: -0.01em; margin-top: 16px; }
+.head2 p { color: var(--muted); margin-top: 10px; max-width: 38ch; }
+.files { display: grid; gap: 8px; }
+.file { background: var(--card); border: 1.5px solid var(--line); border-radius: 16px; padding: 14px; display: grid; gap: 12px; }
+.file .nm { display: flex; gap: 12px; align-items: center; }
+.file .nm svg { width: 32px; height: 32px; flex: none; color: var(--ink); }
+.file .nm code { font: 500 13px/1.35 var(--font-mono); overflow-wrap: anywhere; }
+.file dl { margin: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; font-size: 13px; }
+.file dt { font: 500 11px var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.file dd { margin: 0; font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.file.compact { padding: 12px 14px; }
+.file.compact .nm { justify-content: space-between; }
+.file.compact .meta { font: 400 12px var(--font-mono); color: var(--muted); white-space: nowrap; }
+.timer { display: flex; gap: 8px; align-items: center; font-size: 13px; color: var(--muted); }
+.timer svg { width: 16px; height: 16px; flex: none; }
+.timer b { color: var(--ink); font: 500 13px var(--font-mono); font-variant-numeric: tabular-nums; }
+.tipbox { font-size: 14px; color: var(--muted); display: grid; gap: 4px; }
+.server { background: var(--card); border: 1.5px solid var(--line); border-radius: 14px; padding: 12px 14px; display: grid; gap: 4px; }
+.server span { font: 500 11px var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); }
+.server code { font: 500 14px var(--font-mono); overflow-wrap: anywhere; }
+
+/* Footer strip */
+.tokens { display: flex; flex-wrap: wrap; gap: 24px 36px; align-items: flex-end; justify-content: space-between; border-top: 1.5px solid var(--line); padding-top: 24px; }
+.sw-row { display: flex; flex-wrap: wrap; gap: 14px; }
+.sw { display: grid; gap: 6px; justify-items: start; font: 400 12px var(--font-mono); color: var(--muted); }
+.sw i { width: 44px; height: 44px; border-radius: 12px; border: 1.5px solid var(--line); display: block; }
+.icons { display: flex; align-items: flex-end; gap: 12px; }
+.type-note { max-width: 44ch; color: var(--muted); font-size: 14px; }
+.type-note b { color: var(--ink); font-weight: 600; }
+
+/* Desktop board: the same components, re-composed into two columns inside a browser frame */
+.desk { display: none; flex-direction: column; gap: 40px; }
+.page[data-view="desktop"] .desk { display: flex; }
+.page[data-view="desktop"] .board { display: none; }
+.ctrls { display: flex; flex-wrap: wrap; gap: 10px; }
+.win { border: 1.5px solid var(--line); border-radius: 18px; overflow: hidden; background: var(--bg); display: flex; flex-direction: column; }
+.chrome { display: flex; align-items: center; gap: 14px; padding: 10px 16px; background: var(--soft); border-bottom: 1.5px solid var(--line); }
+.chrome .dots { display: flex; gap: 6px; width: 54px; }
+.chrome .dots i { width: 11px; height: 11px; border-radius: 50%; background: var(--line); display: block; }
+.chrome .addr { flex: 1; max-width: 420px; margin-inline: auto; background: var(--card); border: 1.5px solid var(--line); border-radius: 999px; padding: 3px 14px; font: 400 12px var(--font-mono); color: var(--muted); text-align: center; }
+.chrome .spacer { width: 54px; }
+.dview { padding: 24px 40px 44px; display: flex; flex-direction: column; gap: 36px; min-height: 640px; }
+.dnav { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.dnav .right { display: flex; gap: 10px; align-items: center; }
+.navlink { display: inline-flex; gap: 8px; align-items: center; height: 36px; padding: 0 14px; border: 1.5px solid var(--line); border-radius: 999px; background: var(--card); font: 600 14px var(--font-body); text-decoration: none; color: var(--ink); }
+.navlink:hover { border-color: var(--edge); }
+.count { font: 500 12px var(--font-mono); background: var(--accent); color: var(--accent-ink); border-radius: 999px; padding: 0 7px; }
+.strip { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; background: var(--accent-soft); border: 1.5px solid var(--line); border-radius: 14px; padding: 8px 8px 8px 14px; font-size: 14px; }
+.strip .l { display: flex; gap: 12px; align-items: center; }
+.strip .appicon { --s: 28px; }
+.strip .r { display: flex; gap: 6px; }
+.split { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 44px; align-items: start; }
+.split.even { grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr); }
+.dleft { display: flex; flex-direction: column; gap: 24px; min-width: 0; }
+.dhero { display: flex; flex-direction: column; gap: 22px; min-width: 0; padding-top: 12px; }
+.dhero h2 { font-size: 68px; font-weight: 800; line-height: 0.98; letter-spacing: -0.02em; }
+.dhero .lead { color: var(--muted); font-size: 18px; max-width: 46ch; }
+.field.lg { padding: 8px 8px 8px 26px; }
+.field.lg input { height: 52px; font-size: 17px; }
+.field.lg .btn { height: 52px; padding: 0 30px; font-size: 16px; }
+.sidepanel { background: var(--card); border: 1.5px solid var(--line); border-radius: 20px; padding: 22px; display: flex; flex-direction: column; gap: 20px; min-width: 0; }
+.sidepanel .ph { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.sidepanel h3 { font: 700 18px var(--font-display); }
+.frow { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding-top: 16px; border-top: 1.5px solid var(--line); }
+.frow svg { width: 26px; height: 26px; }
+.frow code { font: 500 13px/1.35 var(--font-mono); overflow-wrap: anywhere; display: block; }
+.frow .mono { display: block; margin-top: 2px; }
+.player { position: relative; aspect-ratio: 16 / 9; border-radius: 16px; overflow: hidden; border: 1.5px solid var(--line); background: var(--soft); }
+.player > svg { display: block; width: 100%; height: 100%; }
+.player .play { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); width: 64px; height: 64px; border-radius: 50%; background: var(--accent); border: 1.5px solid var(--pop); box-shadow: 3px 3px 0 var(--pop); display: grid; place-items: center; }
+.player .play svg { width: 24px; height: 24px; fill: var(--accent-ink); stroke: var(--accent-ink); stroke-width: 2; stroke-linejoin: round; margin-left: 3px; }
+.player .dur { position: absolute; right: 12px; bottom: 12px; font: 500 12px var(--font-mono); background: var(--ink); color: var(--bg); padding: 2px 8px; border-radius: 7px; }
+.dtitle { font: 800 30px/1.12 var(--font-display); letter-spacing: -0.01em; text-wrap: balance; }
+.dsub { color: var(--muted); margin-top: 6px; }
+.wave.tall { height: 96px; }
+.wave.tall .hd { height: 96px; }
+.hd { position: absolute; top: 0; width: 14px; height: 72px; border-radius: 7px; background: var(--accent); border: 1.5px solid var(--pop); transform: translateX(-50%); }
+.times3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }
+.tf .v { font: 500 24px var(--font-mono); font-variant-numeric: tabular-nums; }
+.tf .v small { font: 400 13px var(--font-mono); color: var(--muted); }
+.srow { display: flex; align-items: center; gap: 12px; padding: 12px 0; }
+.srow + .srow { border-top: 1.5px solid var(--line); }
+.srow > div { flex: 1; min-width: 0; }
+.srow b { display: block; font: 700 15px var(--font-display); line-height: 1.2; }
+.srow .sv { display: block; font: 400 12px var(--font-mono); color: var(--muted); margin-top: 2px; }
+.summary { display: grid; gap: 12px; border-top: 1.5px solid var(--line); padding-top: 18px; }
+.recap { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 10px 24px; font-size: 14px; }
+.recap dt { font: 500 11px var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); align-self: center; }
+.recap dd { margin: 0; font-family: var(--font-mono); font-size: 13px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.pct.xl { font-size: 104px; }
+.pct.xl small { font-size: 44px; }
+.dview .head2 h2 { font-size: 52px; }
+.dview .head2 p { font-size: 17px; max-width: 42ch; }
+.btnrow { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.btnrow .btn { padding-inline: 26px; }
+@media (max-width: 900px) {
+  .split, .split.even { grid-template-columns: minmax(0, 1fr); gap: 28px; }
+  .dview { padding: 20px 18px 28px; }
+  .dhero h2 { font-size: 48px; }
+  .pct.xl { font-size: 72px; }
+  .times3 { grid-template-columns: 1fr 1fr; }
+}
+@media (max-width: 420px) {
+  .hero h2 { font-size: 34px; }
+  .app { padding: 16px; }
+  .top h1 { font-size: 34px; }
+  .chip b { font-size: 16px; }
+}
+</style>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <defs>
+    <symbol id="clip" viewBox="0 0 32 32">
+      <path class="clip-wire" d="M9.5 12C7.5 5.5 11 2.5 16 2.5S24.5 5.5 22.5 12"/>
+      <path class="clip-body" d="M5 11.5h22l-3.2 17H8.2z"/>
+    </symbol>
+    <symbol id="thumb" viewBox="0 0 160 90" preserveAspectRatio="xMidYMid slice">
+      <circle class="t-fill" cx="118" cy="28" r="12"/>
+      <path class="t-hill-b" d="M0 90V60Q30 38 62 58T122 56Q146 50 160 60V90Z"/>
+      <path class="t-hill-f" d="M0 90V72Q36 56 76 72T160 70V90Z"/>
+    </symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
+    <symbol id="i-back" viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></symbol>
+    <symbol id="i-chev" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></symbol>
+    <symbol id="i-scissors" viewBox="0 0 24 24"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4L8.1 15.9M14.5 14.5L20 20M8.1 8.1L12 12"/></symbol>
+    <symbol id="i-captions" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M7 11h4M13 11h4M7 15h2M11 15h6"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+  </defs>
+</svg>
+
+<div class="page" data-view="desktop">
+  <header class="top">
+    <div>
+      <h1>MediaGrab</h1>
+      <p>Four desktop screens and nine phone screens for the paste, choose, trim, caption, wait and save flow. It ships as an installable web app first. On a wide screen the same pieces split into two columns. The video, channel and numbers are sample content.</p>
+    </div>
+    <div class="ctrls">
+      <div class="seg" role="group" aria-label="Layout">
+        <button type="button" data-view-set="desktop" aria-pressed="true">Desktop</button>
+        <button type="button" data-view-set="phone" aria-pressed="false">Phone</button>
+      </div>
+      <div class="seg" role="group" aria-label="Theme">
+        <button type="button" data-set-theme="system" aria-pressed="true">System</button>
+        <button type="button" data-set-theme="light" aria-pressed="false">Light</button>
+        <button type="button" data-set-theme="dark" aria-pressed="false">Dark</button>
+      </div>
+    </div>
+  </header>
+
+  <div class="desk">
+
+    <!-- Desktop: paste -->
+    <section class="screen" id="d-paste">
+      <div class="label"><span>Desktop · paste</span><span>start</span></div>
+      <div class="win">
+        <div class="chrome"><div class="dots" aria-hidden="true"><i></i><i></i><i></i></div><div class="addr">localhost:8000</div><div class="spacer"></div></div>
+        <div class="dview">
+          <div class="strip">
+            <div class="l"><div class="appicon" aria-hidden="true"><svg viewBox="0 0 32 32"><use href="#clip"/></svg></div><span>Install MediaGrab to open it from your dock or home screen.</span></div>
+            <div class="r">
+              <button class="btn btn-primary btn-sm" type="button" data-dismiss=".strip">Install</button>
+              <button class="btn btn-quiet btn-sm" type="button" data-dismiss=".strip">Not now</button>
+            </div>
+          </div>
+
+          <div class="dnav">
+            <span class="brand"><svg viewBox="0 0 32 32" aria-hidden="true"><use href="#clip"/></svg>MediaGrab</span>
+            <div class="right">
+              <a class="navlink" href="#d-paste">Your files <span class="count">2</span></a>
+              <button class="icon-btn theme-flip" type="button" aria-label="Switch light or dark">
+                <svg class="ico ico-moon" viewBox="0 0 24 24"><use href="#i-moon"/></svg>
+                <svg class="ico ico-sun" viewBox="0 0 24 24"><use href="#i-sun"/></svg>
+              </button>
+            </div>
+          </div>
+
+          <div class="split">
+            <div class="dhero">
+              <h2>Paste a link.<br>Get a file.</h2>
+              <p class="lead">From YouTube, SoundCloud, TikTok, Vimeo, X, Reddit and about 1,750 other sites. Trim it, caption it, save it as MP4 or MP3.</p>
+              <div class="field lg">
+                <input id="url-desk" type="url" placeholder="Paste a link" aria-label="Link to a video or song">
+                <a class="btn btn-primary" href="#d-choose">Grab</a>
+              </div>
+              <p class="mono">Press Enter to grab. No ads, no tracking.</p>
+              <div class="stage" aria-hidden="true" style="justify-items:start">
+                <svg viewBox="0 0 240 140" style="width:min(100%,260px)">
+                  <g transform="rotate(-8 78 78)">
+                    <rect class="card-a" x="30" y="36" width="96" height="84" rx="12"/>
+                    <text class="txt" x="78" y="86" text-anchor="middle" font-size="26">MP3</text>
+                  </g>
+                  <g transform="rotate(7 154 70)">
+                    <rect class="card-b" x="104" y="28" width="100" height="88" rx="12"/>
+                    <text class="txt" x="154" y="82" text-anchor="middle" font-size="26">MP4</text>
+                    <use href="#clip" x="138" y="10" width="32" height="32"/>
+                  </g>
+                </svg>
+              </div>
+            </div>
+
+            <aside class="sidepanel">
+              <div class="ph"><h3>Your files</h3><span class="mono">Cleared after 30 min</span></div>
+              <div class="frow">
+                <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10 9.5v5l4.5-2.5z"/></svg>
+                <div><code>how-to-keep-a-sourdough-starter-alive.mp4</code><span class="mono">MP4 · 1:15 · 29.1 MB · gone in 24:10</span></div>
+                <button class="btn btn-sm" type="button" data-saved><span>Save</span></button>
+              </div>
+              <div class="frow">
+                <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18V6l10-2v12"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="16.5" cy="16" r="2.5"/></svg>
+                <div><code>morning-bread-radio.mp3</code><span class="mono">MP3 · 192 kbps · 6.0 MB · gone in 11:42</span></div>
+                <button class="btn btn-sm" type="button" data-saved><span>Save</span></button>
+              </div>
+            </aside>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Desktop: choose -->
+    <section class="screen" id="d-choose">
+      <div class="label"><span>Desktop · choose</span><span>video, trim, subtitles</span></div>
+      <div class="win">
+        <div class="chrome"><div class="dots" aria-hidden="true"><i></i><i></i><i></i></div><div class="addr">localhost:8000</div><div class="spacer"></div></div>
+        <div class="dview">
+          <div class="dnav">
+            <span class="brand"><svg viewBox="0 0 32 32" aria-hidden="true"><use href="#clip"/></svg>MediaGrab</span>
+            <div class="right">
+              <a class="navlink" href="#d-paste">Your files <span class="count">2</span></a>
+              <button class="icon-btn theme-flip" type="button" aria-label="Switch light or dark">
+                <svg class="ico ico-moon" viewBox="0 0 24 24"><use href="#i-moon"/></svg>
+                <svg class="ico ico-sun" viewBox="0 0 24 24"><use href="#i-sun"/></svg>
+              </button>
+            </div>
+          </div>
+
+          <div class="split">
+            <div class="dleft">
+              <div class="player">
+                <svg viewBox="0 0 160 90" aria-hidden="true"><use href="#thumb"/></svg>
+                <span class="play" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7 4.5v15l12-7.5z"/></svg></span>
+                <span class="dur">4:12</span>
+              </div>
+              <div>
+                <h2 class="dtitle">How to keep a sourdough starter alive</h2>
+                <p class="dsub">Crumb &amp; Co. Kitchen</p>
+              </div>
+              <div>
+                <div class="sec-title">Trim</div>
+                <div class="wavebox">
+                  <div class="wave tall">
+                    <div class="bars" data-wave data-s="15" data-e="90" data-t="252" aria-hidden="true"></div>
+                    <span class="hd" style="left:5.95%" aria-hidden="true"></span>
+                    <span class="hd" style="left:35.7%" aria-hidden="true"></span>
+                  </div>
+                  <div class="ruler"><span>0:00</span><span>4:12</span></div>
+                </div>
+                <div class="times3">
+                  <div class="tf"><label>Start</label><div class="v">00:15</div></div>
+                  <div class="tf"><label>End</label><div class="v">01:30</div></div>
+                  <div class="tf"><label>Clip</label><div class="v">1:15 <small>of 4:12</small></div></div>
+                </div>
+              </div>
+            </div>
+
+            <aside class="sidepanel">
+              <nav class="fmt" aria-label="Format">
+                <a href="#d-choose" aria-current="true">Video<small>MP4</small></a>
+                <a href="#d-choose">Audio<small>MP3</small></a>
+              </nav>
+
+              <div>
+                <div class="sec-title">Quality</div>
+                <div class="chips">
+                  <label class="opt"><input type="radio" name="dq"><span class="chip"><b>2160p</b><i>122 MB</i><span class="tag slow">encode</span></span></label>
+                  <label class="opt"><input type="radio" name="dq"><span class="chip"><b>1440p</b><i>57 MB</i><span class="tag slow">encode</span></span></label>
+                  <label class="opt"><input type="radio" name="dq" checked><span class="chip"><b>1080p</b><i>29 MB</i><span class="tag fast">remux</span></span></label>
+                  <label class="opt"><input type="radio" name="dq"><span class="chip"><b>720p</b><i>14 MB</i><span class="tag fast">remux</span></span></label>
+                  <label class="opt"><input type="radio" name="dq"><span class="chip"><b>480p</b><i>8.0 MB</i><span class="tag fast">remux</span></span></label>
+                  <label class="opt"><input type="radio" name="dq"><span class="chip"><b>360p</b><i>5.1 MB</i><span class="tag fast">remux</span></span></label>
+                </div>
+                <p class="legend">Sizes are for your 1:15 clip. Remux takes seconds. Encode takes longer.</p>
+              </div>
+
+              <div>
+                <div class="sec-title">Subtitles</div>
+                <div class="srow">
+                  <div><b>English</b><span class="sv">Written by the creator</span></div>
+                  <button class="btn btn-sm" type="button" data-saved><span>Save .srt</span></button>
+                </div>
+                <div class="srow">
+                  <div><b>Embed in the MP4</b><span class="sv">Caption track you can switch on</span></div>
+                  <label class="switch"><input type="checkbox" role="switch" checked aria-label="Embed captions in the MP4"><span class="ui"></span></label>
+                </div>
+              </div>
+
+              <div class="summary">
+                <p class="mono">MP4 · 1080p · 00:15 to 01:30 · English captions</p>
+                <a class="btn btn-primary btn-block" href="#d-working">Grab MP4 · 29 MB</a>
+              </div>
+            </aside>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Desktop: working -->
+    <section class="screen" id="d-working">
+      <div class="label"><span>Desktop · working</span><span>live</span></div>
+      <div class="win">
+        <div class="chrome"><div class="dots" aria-hidden="true"><i></i><i></i><i></i></div><div class="addr">localhost:8000</div><div class="spacer"></div></div>
+        <div class="dview">
+          <div class="dnav">
+            <span class="brand"><svg viewBox="0 0 32 32" aria-hidden="true"><use href="#clip"/></svg>MediaGrab</span>
+            <div class="right">
+              <a class="navlink" href="#d-paste">Your files <span class="count">2</span></a>
+              <button class="icon-btn theme-flip" type="button" aria-label="Switch light or dark">
+                <svg class="ico ico-moon" viewBox="0 0 24 24"><use href="#i-moon"/></svg>
+                <svg class="ico ico-sun" viewBox="0 0 24 24"><use href="#i-sun"/></svg>
+              </button>
+            </div>
+          </div>
+
+          <div class="split even">
+            <div class="dleft" style="gap:28px">
+              <div>
+                <div class="pct xl" aria-live="polite">62<small>%</small></div>
+                <div class="track">
+                  <svg class="clipper" viewBox="0 0 32 32" aria-hidden="true"><use href="#clip"/></svg>
+                  <div class="bar-bg" role="progressbar" aria-valuenow="62" aria-valuemin="0" aria-valuemax="100" aria-label="Download progress"><div class="bar-fill"></div></div>
+                </div>
+              </div>
+              <div class="stats">
+                <div class="stat"><span>Speed</span><b>4.2 MB/s</b></div>
+                <div class="stat"><span>Left</span><b>0:03</b></div>
+                <div class="stat"><span>Got</span><b>18 / 29 MB</b></div>
+              </div>
+              <ul class="steps">
+                <li class="done"><span class="st"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-check"/></svg></span>Read the link</li>
+                <li class="now"><span class="st"></span>Downloading 00:15 to 01:30</li>
+                <li class="todo"><span class="st"></span>Joining video and audio into an MP4</li>
+                <li class="todo"><span class="st"></span>Embedding English captions</li>
+                <li class="todo"><span class="st"></span>Ready to save</li>
+              </ul>
+            </div>
+
+            <aside class="sidepanel">
+              <div class="player">
+                <svg viewBox="0 0 160 90" aria-hidden="true"><use href="#thumb"/></svg>
+                <span class="dur">1:15</span>
+              </div>
+              <h3 class="dtitle" style="font-size:22px">How to keep a sourdough starter alive</h3>
+              <dl class="recap">
+                <dt>Format</dt><dd>MP4 · 1080p</dd>
+                <dt>Clip</dt><dd>00:15 to 01:30 (1:15)</dd>
+                <dt>Captions</dt><dd>English, embedded</dd>
+                <dt>Size</dt><dd>about 29 MB</dd>
+              </dl>
+              <a class="btn btn-quiet btn-block" href="#d-paste">Cancel</a>
+            </aside>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Desktop: ready -->
+    <section class="screen" id="d-ready">
+      <div class="label"><span>Desktop · ready</span><span>done</span></div>
+      <div class="win">
+        <div class="chrome"><div class="dots" aria-hidden="true"><i></i><i></i><i></i></div><div class="addr">localhost:8000</div><div class="spacer"></div></div>
+        <div class="dview">
+          <div class="dnav">
+            <span class="brand"><svg viewBox="0 0 32 32" aria-hidden="true"><use href="#clip"/></svg>MediaGrab</span>
+            <div class="right">
+              <a class="navlink" href="#d-paste">Your files <span class="count">3</span></a>
+              <button class="icon-btn theme-flip" type="button" aria-label="Switch light or dark">
+                <svg class="ico ico-moon" viewBox="0 0 24 24"><use href="#i-moon"/></svg>
+                <svg class="ico ico-sun" viewBox="0 0 24 24"><use href="#i-sun"/></svg>
+              </button>
+            </div>
+          </div>
+
+          <div class="split even">
+            <div class="dleft" style="gap:28px">
+              <div class="head2">
+                <div class="badge good"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-check"/></svg></div>
+                <h2>Got it.</h2>
+                <p>Your clip is ready. Save it before it clears out.</p>
+              </div>
+              <div class="files">
+                <div class="file compact">
+                  <div class="nm">
+                    <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10 9.5v5l4.5-2.5z"/></svg>
+                    <code>how-to-keep-a-sourdough-starter-alive.mp4</code>
+                    <span class="meta">29.1 MB</span>
+                  </div>
+                </div>
+                <div class="file compact">
+                  <div class="nm">
+                    <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-captions"/></svg>
+                    <code>sourdough-starter.srt</code>
+                    <span class="meta">2.4 KB</span>
+                  </div>
+                </div>
+              </div>
+              <div class="btnrow">
+                <button class="btn btn-primary" type="button" data-saved>
+                  <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m0 0l-4.5-4.5M12 15l4.5-4.5M5 20h14"/></svg>
+                  <span>Save MP4</span>
+                </button>
+                <button class="btn" type="button" data-saved><span>Save .srt</span></button>
+                <a class="btn btn-quiet" href="#d-paste">Grab another link</a>
+              </div>
+            </div>
+
+            <aside class="sidepanel">
+              <div class="player">
+                <svg viewBox="0 0 160 90" aria-hidden="true"><use href="#thumb"/></svg>
+                <span class="play" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M7 4.5v15l12-7.5z"/></svg></span>
+                <span class="dur">1:15</span>
+              </div>
+              <dl class="recap">
+                <dt>Quality</dt><dd>1080p</dd>
+                <dt>Length</dt><dd>1:15</dd>
+                <dt>Captions</dt><dd>English, embedded</dd>
+              </dl>
+              <p class="timer"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7.5V12l3 2"/></svg><span>Deleted from this machine in <b>29:41</b></span></p>
+            </aside>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </div>
+
+  <main class="board">
+
+    <!-- Paste -->
+    <section class="screen" id="paste">
+      <div class="label"><span>Paste</span><span>start</span></div>
+      <div class="app">
+        <div class="bar">
+          <span class="brand"><svg viewBox="0 0 32 32" aria-hidden="true"><use href="#clip"/></svg>MediaGrab</span>
+          <button class="icon-btn theme-flip" type="button" aria-label="Switch light or dark">
+            <svg class="ico ico-moon" viewBox="0 0 24 24"><use href="#i-moon"/></svg>
+            <svg class="ico ico-sun" viewBox="0 0 24 24"><use href="#i-sun"/></svg>
+          </button>
+        </div>
+
+        <div class="hero">
+          <h2>Paste a link.<br>Get a file.</h2>
+          <p>From YouTube, SoundCloud, TikTok, Vimeo, X, Reddit and about 1,750 other sites. Trim it, caption it, save it.</p>
+        </div>
+
+        <div class="field">
+          <input id="url-home" type="url" placeholder="Paste a link" aria-label="Link to a video or song">
+          <a class="btn btn-primary" href="#choose-video">Grab</a>
+        </div>
+
+        <div class="stage" aria-hidden="true">
+          <svg viewBox="0 0 240 140">
+            <g transform="rotate(-8 78 78)">
+              <rect class="card-a" x="30" y="36" width="96" height="84" rx="12"/>
+              <text class="txt" x="78" y="86" text-anchor="middle" font-size="26">MP3</text>
+            </g>
+            <g transform="rotate(7 154 70)">
+              <rect class="card-b" x="104" y="28" width="100" height="88" rx="12"/>
+              <text class="txt" x="154" y="82" text-anchor="middle" font-size="26">MP4</text>
+              <use href="#clip" x="138" y="10" width="32" height="32"/>
+            </g>
+          </svg>
+        </div>
+
+        <div class="foot">
+          <div class="install" id="install-card">
+            <div class="r1">
+              <div class="appicon" aria-hidden="true"><svg viewBox="0 0 32 32"><use href="#clip"/></svg></div>
+              <div><b>Install MediaGrab</b><p>One tap from your home screen.</p></div>
+            </div>
+            <div class="r2">
+              <button class="btn btn-primary btn-sm" type="button" data-dismiss="#install-card">Install</button>
+              <button class="btn btn-quiet btn-sm" type="button" data-dismiss="#install-card">Not now</button>
+            </div>
+          </div>
+          <p class="mono">No ads, no tracking. Files delete themselves after 30 minutes.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Choose video -->
+    <section class="screen" id="choose-video">
+      <div class="label"><span>Choose · video</span><span>mp4</span></div>
+      <div class="app">
+        <div class="bar">
+          <span class="brand"><svg viewBox="0 0 32 32" aria-hidden="true"><use href="#clip"/></svg>MediaGrab</span>
+          <button class="icon-btn theme-flip" type="button" aria-label="Switch light or dark">
+            <svg class="ico ico-moon" viewBox="0 0 24 24"><use href="#i-moon"/></svg>
+            <svg class="ico ico-sun" viewBox="0 0 24 24"><use href="#i-sun"/></svg>
+          </button>
+        </div>
+
+        <div class="media">
+          <div class="thumb"><svg viewBox="0 0 160 90" aria-hidden="true"><use href="#thumb"/></svg><span class="dur">4:12</span></div>
+          <div>
+            <h3>How to keep a sourdough starter alive</h3>
+            <p>Crumb &amp; Co. Kitchen</p>
+          </div>
+        </div>
+
+        <nav class="fmt" aria-label="Format">
+          <a href="#choose-video" aria-current="true">Video<small>MP4</small></a>
+          <a href="#choose-audio">Audio<small>MP3</small></a>
+        </nav>
+
+        <form data-fmt="MP4">
+          <div>
+            <div class="sec-title">Quality</div>
+            <div class="chips">
+              <label class="opt"><input type="radio" name="vq" data-full="410" data-size="122 MB"><span class="chip"><b>2160p</b><i>122 MB</i><span class="tag slow">encode</span></span></label>
+              <label class="opt"><input type="radio" name="vq" data-full="190" data-size="57 MB"><span class="chip"><b>1440p</b><i>57 MB</i><span class="tag slow">encode</span></span></label>
+              <label class="opt"><input type="radio" name="vq" data-full="96" data-size="29 MB" checked><span class="chip"><b>1080p</b><i>29 MB</i><span class="tag fast">remux</span></span></label>
+              <label class="opt"><input type="radio" name="vq" data-full="48" data-size="14 MB"><span class="chip"><b>720p</b><i>14 MB</i><span class="tag fast">remux</span></span></label>
+              <label class="opt"><input type="radio" name="vq" data-full="27" data-size="8.0 MB"><span class="chip"><b>480p</b><i>8.0 MB</i><span class="tag fast">remux</span></span></label>
+              <label class="opt"><input type="radio" name="vq" data-full="17" data-size="5.1 MB"><span class="chip"><b>360p</b><i>5.1 MB</i><span class="tag fast">remux</span></span></label>
+            </div>
+            <p class="legend"><span data-size-note>Sizes are for your 1:15 clip.</span> Remux copies the stream into an MP4 in seconds. Encode converts it first and takes longer.</p>
+          </div>
+
+          <div class="setrows">
+            <a class="setrow" href="#trim">
+              <span class="si"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-scissors"/></svg></span>
+              <span><b>Trim</b><span class="sv" data-trim-text>00:15 to 01:30 · 1:15</span></span>
+              <svg class="ico chev" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-chev"/></svg>
+            </a>
+            <a class="setrow" href="#subtitles">
+              <span class="si"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-captions"/></svg></span>
+              <span><b>Subtitles</b><span class="sv">English · embedded in the MP4</span></span>
+              <svg class="ico chev" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-chev"/></svg>
+            </a>
+          </div>
+
+          <div class="foot">
+            <button class="btn btn-primary btn-block" type="submit" data-go="#working"><span class="go-label">Grab MP4 · 29 MB</span></button>
+          </div>
+        </form>
+      </div>
+    </section>
+
+    <!-- Choose audio -->
+    <section class="screen" id="choose-audio">
+      <div class="label"><span>Choose · audio</span><span>mp3</span></div>
+      <div class="app">
+        <div class="bar">
+          <span class="brand"><svg viewBox="0 0 32 32" aria-hidden="true"><use href="#clip"/></svg>MediaGrab</span>
+          <button class="icon-btn theme-flip" type="button" aria-label="Switch light or dark">
+            <svg class="ico ico-moon" viewBox="0 0 24 24"><use href="#i-moon"/></svg>
+            <svg class="ico ico-sun" viewBox="0 0 24 24"><use href="#i-sun"/></svg>
+          </button>
+        </div>
+
+        <div class="media">
+          <div class="thumb"><svg viewBox="0 0 160 90" aria-hidden="true"><use href="#thumb"/></svg><span class="dur">4:12</span></div>
+          <div>
+            <h3>How to keep a sourdough starter alive</h3>
+            <p>Crumb &amp; Co. Kitchen</p>
+          </div>
+        </div>
+
+        <nav class="fmt" aria-label="Format">
+          <a href="#choose-video">Video<small>MP4</small></a>
+          <a href="#choose-audio" aria-current="true">Audio<small>MP3</small></a>
+        </nav>
+
+        <form data-fmt="MP3">
+          <div class="src">
+            <p>Source audio is <b>about 129 kbps</b> Opus.</p>
+            <div class="scale" role="img" aria-label="Scale from 0 to 320 kbps with the source at 129">
+              <div class="ln"></div>
+              <span class="ml" style="left:40.3%">source</span>
+              <span class="mk" style="left:40.3%"></span>
+              <span class="tk" style="left:40%"></span><span class="tl" style="left:40%">128</span>
+              <span class="tk" style="left:60%"></span><span class="tl" style="left:60%">192</span>
+              <span class="tk" style="left:100%"></span><span class="tl end" style="left:100%">320</span>
+            </div>
+          </div>
+
+          <div class="rows">
+            <label class="opt"><input type="radio" name="aq" data-kbps="320" data-size="3.0 MB"><span class="row"><span class="dot"></span><span><span class="nm">High <span>320 kbps</span></span><span class="ds">Biggest file, no extra detail</span></span><span class="sz">3.0 MB</span></span></label>
+            <label class="opt"><input type="radio" name="aq" data-kbps="192" data-size="1.8 MB" checked><span class="row"><span class="dot"></span><span><span class="nm">Medium <span>192 kbps</span></span><span class="ds"><span class="pill">Recommended</span>Room to spare</span></span><span class="sz">1.8 MB</span></span></label>
+            <label class="opt"><input type="radio" name="aq" data-kbps="128" data-size="1.2 MB"><span class="row"><span class="dot"></span><span><span class="nm">Low <span>128 kbps</span></span><span class="ds">Closest to the source</span></span><span class="sz">1.2 MB</span></span></label>
+          </div>
+
+          <div class="setrows">
+            <a class="setrow" href="#trim">
+              <span class="si"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-scissors"/></svg></span>
+              <span><b>Trim</b><span class="sv" data-trim-text>00:15 to 01:30 · 1:15</span></span>
+              <svg class="ico chev" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-chev"/></svg>
+            </a>
+            <a class="setrow" href="#subtitles">
+              <span class="si"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-captions"/></svg></span>
+              <span><b>Transcript</b><span class="sv">English · save a .srt file</span></span>
+              <svg class="ico chev" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-chev"/></svg>
+            </a>
+          </div>
+
+          <p class="tags-line"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M20.6 13.4l-7.2 7.2a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1"/></svg>Artist, title and year are tagged. The thumbnail becomes cover art.</p>
+
+          <div class="foot">
+            <button class="btn btn-primary btn-block" type="submit" data-go="#working"><span class="go-label">Grab MP3 · 1.8 MB</span></button>
+          </div>
+        </form>
+      </div>
+    </section>
+
+    <!-- Trim -->
+    <section class="screen" id="trim">
+      <div class="label"><span>Trim · step</span><span>live</span></div>
+      <div class="app">
+        <div class="bar">
+          <div class="left">
+            <a class="icon-btn" href="#choose-video" aria-label="Back"><svg class="ico" viewBox="0 0 24 24"><use href="#i-back"/></svg></a>
+            <h3>Trim</h3>
+          </div>
+          <button class="icon-btn theme-flip" type="button" aria-label="Switch light or dark">
+            <svg class="ico ico-moon" viewBox="0 0 24 24"><use href="#i-moon"/></svg>
+            <svg class="ico ico-sun" viewBox="0 0 24 24"><use href="#i-sun"/></svg>
+          </button>
+        </div>
+
+        <div class="media">
+          <div class="thumb"><svg viewBox="0 0 160 90" aria-hidden="true"><use href="#thumb"/></svg><span class="dur">4:12</span></div>
+          <div>
+            <h3>How to keep a sourdough starter alive</h3>
+            <p>Crumb &amp; Co. Kitchen</p>
+          </div>
+        </div>
+
+        <div>
+          <div class="wavebox">
+            <div class="wave">
+              <div class="bars" id="trim-bars" aria-hidden="true"></div>
+              <input class="rng" id="trim-s" type="range" min="0" max="252" step="1" value="15" aria-label="Start time in seconds">
+              <input class="rng" id="trim-e" type="range" min="0" max="252" step="1" value="90" aria-label="End time in seconds">
+            </div>
+            <div class="ruler"><span>0:00</span><span>4:12</span></div>
+          </div>
+        </div>
+
+        <div class="times">
+          <div class="tf"><label for="t-start">Start</label><input id="t-start" type="text" inputmode="numeric" value="00:15" autocomplete="off"></div>
+          <div class="tf"><label for="t-end">End</label><input id="t-end" type="text" inputmode="numeric" value="01:30" autocomplete="off"></div>
+        </div>
+        <p class="msg" id="t-msg" role="alert" hidden>Use mm:ss. The end has to come after the start and fit inside 4:12.</p>
+
+        <div>
+          <div class="durline"><b id="t-dur">1:15</b><span>of 4:12</span></div>
+          <p class="save-note" id="t-save">Only this part is downloaded, about 70% less.</p>
+        </div>
+
+        <div class="foot">
+          <button class="btn btn-quiet btn-block" type="button" id="t-reset">Use the whole video</button>
+          <a class="btn btn-primary btn-block" href="#choose-video">Use this clip</a>
+        </div>
+      </div>
+    </section>
+
+    <!-- Subtitles -->
+    <section class="screen" id="subtitles">
+      <div class="label"><span>Subtitles · step</span><span>.srt · mov_text</span></div>
+      <div class="app">
+        <div class="bar">
+          <div class="left">
+            <a class="icon-btn" href="#choose-video" aria-label="Back"><svg class="ico" viewBox="0 0 24 24"><use href="#i-back"/></svg></a>
+            <h3>Subtitles</h3>
+          </div>
+          <button class="icon-btn theme-flip" type="button" aria-label="Switch light or dark">
+            <svg class="ico ico-moon" viewBox="0 0 24 24"><use href="#i-moon"/></svg>
+            <svg class="ico ico-sun" viewBox="0 0 24 24"><use href="#i-sun"/></svg>
+          </button>
+        </div>
+
+        <form>
+          <div>
+            <div class="sec-title">Language</div>
+            <div class="rows">
+              <label class="opt"><input type="radio" name="sl" checked><span class="row"><span class="dot"></span><span><span class="nm">English</span><span class="ds">Written by the creator</span></span><span></span></span></label>
+              <label class="opt"><input type="radio" name="sl"><span class="row"><span class="dot"></span><span><span class="nm">English <span>auto</span></span><span class="ds">Made by the site, may have mistakes</span></span><span></span></span></label>
+              <label class="opt"><input type="radio" name="sl"><span class="row"><span class="dot"></span><span><span class="nm">Spanish</span><span class="ds">Written by the creator</span></span><span></span></span></label>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="ph">
+              <div><h3>Transcript</h3><p>A clean .srt text file with timestamps. Takes about a second.</p></div>
+              <button class="btn btn-sm" type="button" data-saved><span>Save .srt</span></button>
+            </div>
+            <pre class="cues">1
+00:00:15,000 --> 00:00:18,400
+Keep it warm, not hot.
+
+2
+00:00:18,400 --> 00:00:22,100
+Feed it once a day.</pre>
+          </div>
+
+          <div class="panel">
+            <div class="ph">
+              <div><h3>Embed in the MP4</h3><p>Adds a caption track you can switch on in most players. Not for MP3.</p></div>
+              <label class="switch"><input type="checkbox" role="switch" checked aria-label="Embed captions in the MP4"><span class="ui"></span></label>
+            </div>
+          </div>
+
+          <div class="foot">
+            <a class="btn btn-primary btn-block" href="#choose-video">Done</a>
+          </div>
+        </form>
+      </div>
+    </section>
+
+    <!-- Working -->
+    <section class="screen" id="working">
+      <div class="label"><span>Working</span><span>live</span></div>
+      <div class="app">
+        <div class="bar">
+          <span class="brand"><svg viewBox="0 0 32 32" aria-hidden="true"><use href="#clip"/></svg>MediaGrab</span>
+          <button class="icon-btn theme-flip" type="button" aria-label="Switch light or dark">
+            <svg class="ico ico-moon" viewBox="0 0 24 24"><use href="#i-moon"/></svg>
+            <svg class="ico ico-sun" viewBox="0 0 24 24"><use href="#i-sun"/></svg>
+          </button>
+        </div>
+
+        <div class="media">
+          <div class="thumb"><svg viewBox="0 0 160 90" aria-hidden="true"><use href="#thumb"/></svg><span class="dur">1:15</span></div>
+          <div>
+            <h3>How to keep a sourdough starter alive</h3>
+            <p>MP4 · 1080p · 00:15 to 01:30</p>
+          </div>
+        </div>
+
+        <div>
+          <div class="pct" aria-live="polite">62<small>%</small></div>
+          <div class="track">
+            <svg class="clipper" viewBox="0 0 32 32" aria-hidden="true"><use href="#clip"/></svg>
+            <div class="bar-bg" role="progressbar" aria-valuenow="62" aria-valuemin="0" aria-valuemax="100" aria-label="Download progress"><div class="bar-fill"></div></div>
+          </div>
+        </div>
+
+        <div class="stats">
+          <div class="stat"><span>Speed</span><b>4.2 MB/s</b></div>
+          <div class="stat"><span>Left</span><b>0:03</b></div>
+          <div class="stat"><span>Got</span><b>18 / 29</b></div>
+        </div>
+
+        <ul class="steps">
+          <li class="done"><span class="st"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-check"/></svg></span>Read the link</li>
+          <li class="now"><span class="st"></span>Downloading 00:15 to 01:30</li>
+          <li class="todo"><span class="st"></span>Joining video and audio into an MP4</li>
+          <li class="todo"><span class="st"></span>Embedding English captions</li>
+          <li class="todo"><span class="st"></span>Ready to save</li>
+        </ul>
+
+        <div class="foot">
+          <a class="btn btn-quiet btn-block" href="#paste">Cancel</a>
+        </div>
+      </div>
+    </section>
+
+    <!-- Ready -->
+    <section class="screen" id="ready">
+      <div class="label"><span>Ready</span><span>done</span></div>
+      <div class="app">
+        <div class="bar">
+          <span class="brand"><svg viewBox="0 0 32 32" aria-hidden="true"><use href="#clip"/></svg>MediaGrab</span>
+          <button class="icon-btn theme-flip" type="button" aria-label="Switch light or dark">
+            <svg class="ico ico-moon" viewBox="0 0 24 24"><use href="#i-moon"/></svg>
+            <svg class="ico ico-sun" viewBox="0 0 24 24"><use href="#i-sun"/></svg>
+          </button>
+        </div>
+
+        <div class="head2">
+          <div class="badge good"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-check"/></svg></div>
+          <h2>Got it.</h2>
+          <p>Your clip is ready. Save it before it clears out.</p>
+        </div>
+
+        <div class="files">
+          <div class="file">
+            <div class="nm">
+              <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="3"/><path d="M10 9.5v5l4.5-2.5z"/></svg>
+              <code>how-to-keep-a-sourdough-starter-alive.mp4</code>
+            </div>
+            <dl>
+              <div><dt>Quality</dt><dd>1080p</dd></div>
+              <div><dt>Length</dt><dd>1:15</dd></div>
+              <div><dt>Size</dt><dd>29.1 MB</dd></div>
+              <div><dt>Captions</dt><dd>English</dd></div>
+            </dl>
+          </div>
+          <div class="file compact">
+            <div class="nm">
+              <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-captions"/></svg>
+              <code>sourdough-starter.srt</code>
+              <span class="meta">2.4 KB</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="foot">
+          <p class="timer"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7.5V12l3 2"/></svg><span>Deleted from this machine in <b>29:41</b></span></p>
+          <button class="btn btn-primary btn-block" type="button" data-saved>
+            <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v11m0 0l-4.5-4.5M12 15l4.5-4.5M5 20h14"/></svg>
+            <span>Save MP4</span>
+          </button>
+          <button class="btn btn-block" type="button" data-saved><span>Save .srt</span></button>
+          <a class="btn btn-quiet btn-block" href="#paste">Grab another link</a>
+        </div>
+      </div>
+    </section>
+
+    <!-- Error -->
+    <section class="screen" id="error">
+      <div class="label"><span>Error</span><span>bad link</span></div>
+      <div class="app">
+        <div class="bar">
+          <span class="brand"><svg viewBox="0 0 32 32" aria-hidden="true"><use href="#clip"/></svg>MediaGrab</span>
+          <button class="icon-btn theme-flip" type="button" aria-label="Switch light or dark">
+            <svg class="ico ico-moon" viewBox="0 0 24 24"><use href="#i-moon"/></svg>
+            <svg class="ico ico-sun" viewBox="0 0 24 24"><use href="#i-sun"/></svg>
+          </button>
+        </div>
+
+        <div class="head2">
+          <div class="badge warn"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 7v6M12 17h.01"/></svg></div>
+          <h2>That link didn't work.</h2>
+          <p>There's no video or audio at this address.</p>
+        </div>
+
+        <div>
+          <div class="field bad">
+            <input id="url-bad" type="url" value="https://youtube.com/watch?v=" aria-label="Link to a video or song" aria-invalid="true" aria-describedby="url-bad-msg">
+            <a class="btn btn-primary" href="#paste">Retry</a>
+          </div>
+          <p class="err-line" id="url-bad-msg">The link looks cut off after the equals sign.</p>
+        </div>
+
+        <div class="tipbox">
+          <p>Copy the full address from your browser's address bar.</p>
+          <p>Private and members-only videos can't be grabbed.</p>
+        </div>
+
+        <div class="foot">
+          <p class="mono">Details: Unsupported URL</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- Offline -->
+    <section class="screen" id="offline">
+      <div class="label"><span>Error · offline</span><span>pwa</span></div>
+      <div class="app">
+        <div class="bar">
+          <span class="brand"><svg viewBox="0 0 32 32" aria-hidden="true"><use href="#clip"/></svg>MediaGrab</span>
+          <button class="icon-btn theme-flip" type="button" aria-label="Switch light or dark">
+            <svg class="ico ico-moon" viewBox="0 0 24 24"><use href="#i-moon"/></svg>
+            <svg class="ico ico-sun" viewBox="0 0 24 24"><use href="#i-sun"/></svg>
+          </button>
+        </div>
+
+        <div class="head2">
+          <div class="badge off"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 8.8a15 15 0 0 1 4.2-2.6M8.5 5.2A15 15 0 0 1 22 8.8M5 12.9a10 10 0 0 1 5-2.7M13.5 10.2a10 10 0 0 1 5.5 2.7M8.5 16.4a5 5 0 0 1 7 0M12 20h.01M2 2l20 20"/></svg></div>
+          <h2>Can't reach MediaGrab.</h2>
+          <p>You're offline, or the server isn't answering. The app is still installed. Nothing was lost.</p>
+        </div>
+
+        <div class="server">
+          <span>Server</span>
+          <code>localhost:8000</code>
+        </div>
+
+        <div class="tipbox">
+          <p>Check your connection and that the server is running.</p>
+          <p>Files you already grabbed stay available until their 30 minutes are up.</p>
+        </div>
+
+        <div class="foot">
+          <a class="btn btn-primary btn-block" href="#paste">Try again</a>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="tokens">
+    <div class="sw-row" aria-label="Palette">
+      <div class="sw"><i style="background:var(--board)"></i>board</div>
+      <div class="sw"><i style="background:var(--bg)"></i>bg</div>
+      <div class="sw"><i style="background:var(--card)"></i>card</div>
+      <div class="sw"><i style="background:var(--ink)"></i>ink</div>
+      <div class="sw"><i style="background:var(--accent)"></i>accent</div>
+      <div class="sw"><i style="background:var(--accent-soft)"></i>accent-soft</div>
+      <div class="sw"><i style="background:var(--ok)"></i>ok</div>
+      <div class="sw"><i style="background:var(--bad)"></i>bad</div>
+    </div>
+    <div class="icons" aria-label="App icon at three sizes">
+      <div class="appicon" style="--s:72px"><svg viewBox="0 0 32 32" aria-hidden="true"><use href="#clip"/></svg></div>
+      <div class="appicon" style="--s:48px"><svg viewBox="0 0 32 32" aria-hidden="true"><use href="#clip"/></svg></div>
+      <div class="appicon" style="--s:32px"><svg viewBox="0 0 32 32" aria-hidden="true"><use href="#clip"/></svg></div>
+    </div>
+    <p class="type-note"><b>Gabarito</b> for headings, <b>Onest</b> for text, <b>DM Mono</b> for sizes, times and file names. One marigold accent, no gradients, a hard shadow only on the main button. The app icon is the clip on marigold, and the browser theme color follows light and dark.</p>
+  </footer>
+</div>
+
+<script>
+(function () {
+  var root = document.documentElement;
+  function current() { return root.getAttribute('data-theme') || 'system'; }
+  function sync() {
+    var m = current();
+    document.querySelectorAll('[data-set-theme]').forEach(function (b) {
+      b.setAttribute('aria-pressed', String(b.getAttribute('data-set-theme') === m));
+    });
+  }
+  function setTheme(m) {
+    if (m === 'system') root.removeAttribute('data-theme'); else root.setAttribute('data-theme', m);
+    try { localStorage.setItem('mg-theme', m); } catch (e) {}
+    sync();
+  }
+  try {
+    var saved = localStorage.getItem('mg-theme');
+    if (saved === 'light' || saved === 'dark') root.setAttribute('data-theme', saved);
+  } catch (e) {}
+  sync();
+  document.querySelectorAll('[data-set-theme]').forEach(function (b) {
+    b.addEventListener('click', function () { setTheme(b.getAttribute('data-set-theme')); });
+  });
+  document.querySelectorAll('.theme-flip').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var m = current();
+      var dark = m === 'dark' || (m === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+      setTheme(dark ? 'light' : 'dark');
+    });
+  });
+
+  /* Trim state shared by the trim step and both choose screens */
+  var TOTAL = 252, S = 15, E = 90;
+  var bars = document.getElementById('trim-bars');
+  var rs = document.getElementById('trim-s'), re = document.getElementById('trim-e');
+  var ts = document.getElementById('t-start'), te = document.getElementById('t-end');
+  var tdur = document.getElementById('t-dur'), tsave = document.getElementById('t-save'), tmsg = document.getElementById('t-msg');
+  var BARN = 56, barEls = [];
+  for (var i = 0; i < BARN; i++) {
+    var el = document.createElement('i');
+    el.style.height = (22 + Math.round(58 * Math.abs(Math.sin(i * 0.9) * Math.cos(i * 0.37 + 1)))) + '%';
+    bars.appendChild(el); barEls.push(el);
+  }
+  function mmss(n) { var m = Math.floor(n / 60), s = n % 60; return (m < 10 ? '0' : '') + m + ':' + (s < 10 ? '0' : '') + s; }
+  function dur(n) { var m = Math.floor(n / 60), s = n % 60; return m + ':' + (s < 10 ? '0' : '') + s; }
+  function parse(v) { var m = /^\s*(\d{1,2}):([0-5]\d)\s*$/.exec(v); return m ? (+m[1]) * 60 + (+m[2]) : null; }
+  function mb(v) { return v >= 10 ? Math.round(v) + ' MB' : v.toFixed(1) + ' MB'; }
+
+  function refreshForms() {
+    document.querySelectorAll('form[data-fmt]').forEach(function (f) {
+      var label = f.querySelector('.go-label'), c = f.querySelector('input:checked');
+      if (c && label) label.textContent = 'Grab ' + f.getAttribute('data-fmt') + ' · ' + c.getAttribute('data-size');
+    });
+  }
+  function render() {
+    var d = E - S, whole = (S === 0 && E === TOTAL);
+    rs.value = S; re.value = E; ts.value = mmss(S); te.value = mmss(E);
+    tdur.textContent = dur(d);
+    tsave.textContent = whole ? 'The whole video is downloaded.' : 'Only this part is downloaded, about ' + Math.round((1 - d / TOTAL) * 100) + '% less.';
+    barEls.forEach(function (b, k) { b.classList.toggle('on', k / BARN >= S / TOTAL - 0.001 && k / BARN < E / TOTAL); });
+    var txt = whole ? 'Whole video · ' + dur(TOTAL) : mmss(S) + ' to ' + mmss(E) + ' · ' + dur(d);
+    document.querySelectorAll('[data-trim-text]').forEach(function (n) { n.textContent = txt; });
+    document.querySelectorAll('[data-size-note]').forEach(function (n) { n.textContent = whole ? 'Sizes are for the whole video.' : 'Sizes are for your ' + dur(d) + ' clip.'; });
+    document.querySelectorAll('input[data-full]').forEach(function (inp) {
+      var s = mb(parseFloat(inp.getAttribute('data-full')) * d / TOTAL);
+      inp.setAttribute('data-size', s); inp.nextElementSibling.querySelector('i').textContent = s;
+    });
+    document.querySelectorAll('input[data-kbps]').forEach(function (inp) {
+      var s = mb(parseFloat(inp.getAttribute('data-kbps')) * d / 8 / 1000);
+      inp.setAttribute('data-size', s); inp.nextElementSibling.querySelector('.sz').textContent = s;
+    });
+    refreshForms();
+  }
+  rs.addEventListener('input', function () { var v = +rs.value; if (v >= E) v = E - 1; S = v; tmsg.hidden = true; render(); });
+  re.addEventListener('input', function () { var v = +re.value; if (v <= S) v = S + 1; E = v; tmsg.hidden = true; render(); });
+  ts.addEventListener('change', function () { var v = parse(ts.value); if (v === null || v >= E) { tmsg.hidden = false; } else { S = v; tmsg.hidden = true; } render(); });
+  te.addEventListener('change', function () { var v = parse(te.value); if (v === null || v <= S || v > TOTAL) { tmsg.hidden = false; } else { E = v; tmsg.hidden = true; } render(); });
+  document.getElementById('t-reset').addEventListener('click', function () { S = 0; E = TOTAL; tmsg.hidden = true; render(); });
+  render();
+
+  document.querySelectorAll('form[data-fmt]').forEach(function (f) {
+    f.addEventListener('change', refreshForms);
+  });
+  document.querySelectorAll('form').forEach(function (f) {
+    f.addEventListener('submit', function (e) {
+      e.preventDefault();
+      var go = f.querySelector('[data-go]');
+      var target = go && go.getAttribute('data-go');
+      var el = target && document.querySelector(target);
+      if (el) el.scrollIntoView({ block: 'start' });
+    });
+  });
+
+  document.querySelectorAll('[data-saved]').forEach(function (b) {
+    b.addEventListener('click', function () { var s = b.querySelector('span'); if (s) s.textContent = 'Saved'; });
+  });
+  document.querySelectorAll('[data-wave]').forEach(function (w) {
+    var a = +w.getAttribute('data-s'), b = +w.getAttribute('data-e'), t = +w.getAttribute('data-t'), n = 72;
+    for (var k = 0; k < n; k++) {
+      var el = document.createElement('i');
+      el.style.height = (22 + Math.round(58 * Math.abs(Math.sin(k * 0.9) * Math.cos(k * 0.37 + 1)))) + '%';
+      if (k / n >= a / t - 0.001 && k / n < b / t) el.className = 'on';
+      w.appendChild(el);
+    }
+  });
+
+  var page = document.querySelector('.page');
+  function setView(v) {
+    page.setAttribute('data-view', v);
+    document.querySelectorAll('[data-view-set]').forEach(function (b) {
+      b.setAttribute('aria-pressed', String(b.getAttribute('data-view-set') === v));
+    });
+    try { localStorage.setItem('mg-view', v); } catch (e) {}
+  }
+  try {
+    var sv = localStorage.getItem('mg-view');
+    if (sv === 'phone' || sv === 'desktop') setView(sv);
+  } catch (e) {}
+  document.querySelectorAll('[data-view-set]').forEach(function (b) {
+    b.addEventListener('click', function () { setView(b.getAttribute('data-view-set')); });
+  });
+
+  document.querySelectorAll('[data-dismiss]').forEach(function (b) {
+    b.addEventListener('click', function () { var t = document.querySelector(b.getAttribute('data-dismiss')); if (t) t.hidden = true; });
+  });
+})();
+</script>
+
+</body></html>
