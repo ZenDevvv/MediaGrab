@@ -51,32 +51,57 @@
   // --- Helper Utilities ---
   function formatSeconds(sec) {
     if (isNaN(sec) || sec < 0) sec = 0;
-    const m = Math.floor(sec / 60);
-    const s = Math.floor(sec % 60);
+    sec = Math.round(sec);
+    const h = Math.floor(sec / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const s = sec % 60;
+    if (h > 0) {
+      return `${h}:${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}`;
+    }
     return `${m}:${s < 10 ? '0' : ''}${s}`;
   }
 
   function formatTimeMMSS(sec) {
-    const m = Math.floor(sec / 60);
-    const s = Math.floor(sec % 60);
-    return `${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}`;
+    return formatSeconds(sec);
   }
 
   function parseTimeInput(val) {
+    if (val === null || val === undefined) return null;
+    val = String(val).trim();
     if (!val) return null;
-    const parts = val.trim().split(':');
+
+    // Support e.g. 15m15s or 15m or 915s
+    const mMatch = /^(\d+)m(?:(\d+)s)?$/i.exec(val);
+    if (mMatch) {
+      return parseInt(mMatch[1], 10) * 60 + (mMatch[2] ? parseInt(mMatch[2], 10) : 0);
+    }
+    const sMatch = /^(\d+)s$/i.exec(val);
+    if (sMatch) {
+      return parseInt(sMatch[1], 10);
+    }
+
+    const parts = val.split(':');
     if (parts.length === 2) {
       const m = parseInt(parts[0], 10);
       const s = parseInt(parts[1], 10);
-      if (!isNaN(m) && !isNaN(s) && s < 60) return m * 60 + s;
+      if (!isNaN(m) && !isNaN(s) && s < 60 && m >= 0) return m * 60 + s;
     } else if (parts.length === 3) {
       const h = parseInt(parts[0], 10);
       const m = parseInt(parts[1], 10);
       const s = parseInt(parts[2], 10);
-      if (!isNaN(h) && !isNaN(m) && !isNaN(s) && m < 60 && s < 60) return h * 3600 + m * 60 + s;
+      if (!isNaN(h) && !isNaN(m) && !isNaN(s) && h >= 0 && m < 60 && s < 60) return h * 3600 + m * 60 + s;
     }
     const raw = parseInt(val, 10);
-    return isNaN(raw) ? null : raw;
+    return (isNaN(raw) || raw < 0) ? null : raw;
+  }
+
+  function extractUrlTimestamp(urlStr) {
+    try {
+      const u = new URL(urlStr);
+      const t = u.searchParams.get('t');
+      if (t) return parseTimeInput(t);
+    } catch (_) {}
+    return null;
   }
 
   function formatBytes(bytes) {
@@ -220,22 +245,28 @@
     }
   }
 
-  function updateTrimUI() {
+  function updateTrimUI(activeSlider = null) {
     const { total, start, end } = AppState.trim;
-    const duration = end - start;
+    const duration = Math.max(0, end - start);
     const isWhole = start === 0 && end === total;
 
     // Sliders
     const rs = $('#trim-s');
     const re = $('#trim-e');
-    if (rs) { rs.max = total; rs.value = start; }
-    if (re) { re.max = total; re.value = end; }
+    if (rs) {
+      rs.max = total;
+      if (activeSlider !== 'start') rs.value = start;
+    }
+    if (re) {
+      re.max = total;
+      if (activeSlider !== 'end') re.value = end;
+    }
 
-    // Text inputs
+    // Text inputs (avoid clobbering input while user is actively typing)
     const ts = $('#t-start');
     const te = $('#t-end');
-    if (ts) ts.value = formatTimeMMSS(start);
-    if (te) te.value = formatTimeMMSS(end);
+    if (ts && document.activeElement !== ts) ts.value = formatSeconds(start);
+    if (te && document.activeElement !== te) te.value = formatSeconds(end);
 
     // Duration displays
     $('#ruler-start').textContent = '0:00';
@@ -258,7 +289,7 @@
     // Update Chooser Screen Summary
     const summaryText = isWhole
       ? `Whole video · ${formatSeconds(total)}`
-      : `${formatTimeMMSS(start)} to ${formatTimeMMSS(end)} · ${formatSeconds(duration)}`;
+      : `${formatSeconds(start)} to ${formatSeconds(end)} · ${formatSeconds(duration)}`;
     $('#trim-summary-text').textContent = summaryText;
     $('#config-summary-clip').textContent = `Clip: ${summaryText}`;
 
@@ -377,9 +408,16 @@
 
     // Initialize Trim boundaries
     AppState.trim.total = data.duration || 60;
-    AppState.trim.start = 0;
-    AppState.trim.end = data.duration || 60;
-    AppState.trim.active = false;
+    const urlTime = extractUrlTimestamp(url);
+    if (urlTime !== null && urlTime < AppState.trim.total) {
+      AppState.trim.start = urlTime;
+      AppState.trim.end = AppState.trim.total;
+      AppState.trim.active = true;
+    } else {
+      AppState.trim.start = 0;
+      AppState.trim.end = data.duration || 60;
+      AppState.trim.active = false;
+    }
     initTrimWaveform();
     updateTrimUI();
 
@@ -587,7 +625,16 @@
 
     // Advance Stage steps based on server state string
     const stage = (data.stage || '').toLowerCase();
-    if (stage.includes('process') || stage.includes('remux') || stage.includes('join')) {
+    if (data.stage) {
+      if (stage.includes('trim')) {
+        const stepDl = $('#step-download');
+        if (stepDl) {
+          stepDl.className = 'now';
+          stepDl.innerHTML = `<span class="st"></span>${data.stage}`;
+        }
+      }
+    }
+    if (stage.includes('process') || stage.includes('remux') || stage.includes('join') || stage.includes('convert')) {
       setStepState('step-download', 'done');
       setStepState('step-process', 'now');
     } else if (stage.includes('caption') || stage.includes('tag') || stage.includes('art')) {
@@ -776,12 +823,45 @@
     });
 
     // Step Navigations
-    $('#row-open-trim').addEventListener('click', () => showScreen('trim'));
+    $('#row-open-trim').addEventListener('click', () => {
+      const errEl = $('#trim-error');
+      if (errEl) errEl.hidden = true;
+      updateTrimUI();
+      showScreen('trim');
+    });
     $('#btn-trim-back').addEventListener('click', () => showScreen('choose'));
-    $('#btn-trim-apply').addEventListener('click', () => showScreen('choose'));
+
+    $('#btn-trim-apply').addEventListener('click', () => {
+      const ts = $('#t-start');
+      const te = $('#t-end');
+      const s = parseTimeInput(ts ? ts.value : '');
+      const e = parseTimeInput(te ? te.value : '');
+      const total = AppState.trim.total || 60;
+
+      if (s === null || e === null || s < 0 || e <= s || e > total) {
+        const errEl = $('#trim-error');
+        if (errEl) {
+          errEl.textContent = `Invalid clip range. End must come after start and fit within ${formatSeconds(total)}.`;
+          errEl.hidden = false;
+        }
+        return;
+      }
+
+      const errEl = $('#trim-error');
+      if (errEl) errEl.hidden = true;
+      AppState.trim.start = s;
+      AppState.trim.end = e;
+      AppState.trim.active = (s > 0 || e < total);
+      updateTrimUI();
+      showScreen('choose');
+    });
+
     $('#btn-trim-reset').addEventListener('click', () => {
       AppState.trim.start = 0;
       AppState.trim.end = AppState.trim.total;
+      AppState.trim.active = false;
+      const errEl = $('#trim-error');
+      if (errEl) errEl.hidden = true;
       updateTrimUI();
       showScreen('choose');
     });
@@ -794,44 +874,97 @@
     // Trim Sliders
     const rs = $('#trim-s');
     const re = $('#trim-e');
-    rs.addEventListener('input', () => {
-      let v = parseInt(rs.value, 10);
-      if (v >= AppState.trim.end) v = AppState.trim.end - 1;
-      AppState.trim.start = Math.max(0, v);
-      $('#trim-error').hidden = true;
-      updateTrimUI();
-    });
-    re.addEventListener('input', () => {
-      let v = parseInt(re.value, 10);
-      if (v <= AppState.trim.start) v = AppState.trim.start + 1;
-      AppState.trim.end = Math.min(AppState.trim.total, v);
-      $('#trim-error').hidden = true;
-      updateTrimUI();
-    });
+    if (rs && re) {
+      rs.addEventListener('input', () => {
+        let v = parseInt(rs.value, 10);
+        if (v >= AppState.trim.end) {
+          v = AppState.trim.end - 1;
+          rs.value = v;
+        }
+        AppState.trim.start = Math.max(0, v);
+        rs.style.zIndex = '4';
+        re.style.zIndex = '3';
+        const errEl = $('#trim-error');
+        if (errEl) errEl.hidden = true;
+        updateTrimUI('start');
+      });
+
+      re.addEventListener('input', () => {
+        let v = parseInt(re.value, 10);
+        if (v <= AppState.trim.start) {
+          v = AppState.trim.start + 1;
+          re.value = v;
+        }
+        AppState.trim.end = Math.min(AppState.trim.total, v);
+        re.style.zIndex = '4';
+        rs.style.zIndex = '3';
+        const errEl = $('#trim-error');
+        if (errEl) errEl.hidden = true;
+        updateTrimUI('end');
+      });
+    }
+
+    // Waveform click seeking
+    const waveBox = $('.wavebox');
+    if (waveBox) {
+      waveBox.addEventListener('click', (e) => {
+        if (e.target === rs || e.target === re) return;
+        const wave = $('.wave');
+        if (!wave) return;
+        const rect = wave.getBoundingClientRect();
+        const clientX = e.clientX;
+        if (clientX < rect.left || clientX > rect.right) return;
+        const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+        const clickedSec = Math.round(ratio * AppState.trim.total);
+        const distToStart = Math.abs(clickedSec - AppState.trim.start);
+        const distToEnd = Math.abs(clickedSec - AppState.trim.end);
+        if (distToStart < distToEnd) {
+          if (clickedSec < AppState.trim.end) {
+            AppState.trim.start = clickedSec;
+            if (rs) rs.style.zIndex = '4';
+            if (re) re.style.zIndex = '3';
+            updateTrimUI();
+          }
+        } else {
+          if (clickedSec > AppState.trim.start) {
+            AppState.trim.end = clickedSec;
+            if (re) re.style.zIndex = '4';
+            if (rs) rs.style.zIndex = '3';
+            updateTrimUI();
+          }
+        }
+      });
+    }
 
     // Trim Text Inputs
     const ts = $('#t-start');
     const te = $('#t-end');
-    ts.addEventListener('change', () => {
-      const v = parseTimeInput(ts.value);
-      if (v === null || v >= AppState.trim.end || v < 0) {
-        $('#trim-error').hidden = false;
-      } else {
-        AppState.trim.start = v;
-        $('#trim-error').hidden = true;
+    const handleInputCommit = () => {
+      const s = parseTimeInput(ts ? ts.value : '');
+      const e = parseTimeInput(te ? te.value : '');
+      const total = AppState.trim.total || 60;
+      const errEl = $('#trim-error');
+      if (s !== null && e !== null && s >= 0 && e > s && e <= total) {
+        AppState.trim.start = s;
+        AppState.trim.end = e;
+        AppState.trim.active = (s > 0 || e < total);
+        if (errEl) errEl.hidden = true;
         updateTrimUI();
-      }
-    });
-    te.addEventListener('change', () => {
-      const v = parseTimeInput(te.value);
-      if (v === null || v <= AppState.trim.start || v > AppState.trim.total) {
-        $('#trim-error').hidden = false;
       } else {
-        AppState.trim.end = v;
-        $('#trim-error').hidden = true;
-        updateTrimUI();
+        if (errEl) {
+          errEl.textContent = `Invalid clip range. End must come after start and fit within ${formatSeconds(total)}.`;
+          errEl.hidden = false;
+        }
       }
-    });
+    };
+    if (ts) {
+      ts.addEventListener('change', handleInputCommit);
+      ts.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); handleInputCommit(); } });
+    }
+    if (te) {
+      te.addEventListener('change', handleInputCommit);
+      te.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); handleInputCommit(); } });
+    }
 
     // Start Download Button
     $('#btn-start-download').addEventListener('click', startDownload);

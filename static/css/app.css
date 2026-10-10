@@ -502,22 +502,33 @@ svg .t-hill-f { fill: var(--ink); fill-opacity: 0.12; }
 
 /* Trim Timeline Box */
 .wavebox { background: var(--card); border: 1.5px solid var(--line); border-radius: 16px; padding: 14px; }
-.wave { position: relative; height: 72px; }
+.wave { position: relative; height: 72px; cursor: pointer; }
 .wave.tall { height: 96px; }
-.bars { position: absolute; inset: 0; display: flex; align-items: center; gap: 2px; padding-inline: 7px; }
+.bars { position: absolute; inset: 0; display: flex; align-items: center; gap: 2px; padding-inline: 7px; pointer-events: none; }
 .bars i { flex: 1; min-width: 0; border-radius: 2px; background: var(--line); }
 .bars i.on { background: var(--ink); }
 .rng {
   position: absolute; inset: 0; width: 100%; height: 100%; margin: 0;
   background: transparent; pointer-events: none; -webkit-appearance: none; appearance: none;
+  z-index: 2;
+}
+.rng:focus, .rng:active {
+  z-index: 5 !important;
+  outline: none;
 }
 .rng::-webkit-slider-thumb {
-  -webkit-appearance: none; pointer-events: auto; width: 14px; height: 72px;
-  border-radius: 7px; background: var(--accent); border: 1.5px solid var(--pop); cursor: ew-resize;
+  -webkit-appearance: none; pointer-events: auto; width: 16px; height: 72px;
+  border-radius: 8px; background: var(--accent); border: 1.5px solid var(--pop); cursor: ew-resize;
+  box-shadow: 1px 1px 0 var(--pop);
+  position: relative;
+  z-index: 6;
 }
 .rng::-moz-range-thumb {
-  pointer-events: auto; width: 12px; height: 70px;
-  border-radius: 7px; background: var(--accent); border: 1.5px solid var(--pop); cursor: ew-resize;
+  pointer-events: auto; width: 14px; height: 70px;
+  border-radius: 8px; background: var(--accent); border: 1.5px solid var(--pop); cursor: ew-resize;
+  box-shadow: 1px 1px 0 var(--pop);
+  position: relative;
+  z-index: 6;
 }
 .ruler { display: flex; justify-content: space-between; font: 400 11px var(--font-mono); color: var(--muted); margin-top: 8px; }
 

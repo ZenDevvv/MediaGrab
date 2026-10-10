@@ -5,6 +5,7 @@ from app.services.downloader import (
     format_speed,
     format_eta,
     format_size,
+    format_seconds,
     sanitize_filename
 )
 
@@ -15,6 +16,10 @@ def test_helpers():
 
     assert format_eta(75) == "1:15"
     assert format_eta(0) == "0:00"
+
+    assert format_seconds(75) == "1:15"
+    assert format_seconds(3665) == "1:01:05"
+    assert format_seconds(0) == "0:00"
 
     assert format_size(29.1 * 1024 * 1024) == "29 MB"
     assert format_size(1.8 * 1024 * 1024) == "1.8 MB"

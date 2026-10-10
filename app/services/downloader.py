@@ -28,6 +28,16 @@ def format_eta(seconds: Optional[int]) -> str:
     s = seconds % 60
     return f"{m}:{s:02d}"
 
+def format_seconds(seconds: int) -> str:
+    if seconds < 0:
+        return "0:00"
+    m = seconds // 60
+    s = seconds % 60
+    h = m // 60
+    if h > 0:
+        return f"{h}:{m % 60:02d}:{s:02d}"
+    return f"{m}:{s:02d}"
+
 def format_size(bytes_val: Optional[int]) -> str:
     if not bytes_val or bytes_val <= 0:
         return "-- MB"
@@ -71,11 +81,25 @@ def create_ydl_opts(job_id: str, request: DownloadRequest) -> Dict[str, Any]:
                 stage="Remuxing & processing media"
             )
 
+    def postprocessor_hook(d: Dict[str, Any]):
+        status = d.get('status')
+        postprocessor = d.get('postprocessor', '')
+        if status == 'started':
+            if "ExtractAudio" in postprocessor:
+                job_manager.update_job(job_id, status="processing", progress=99.0, stage="Converting audio to MP3...")
+            elif "EmbedThumbnail" in postprocessor or "Metadata" in postprocessor:
+                job_manager.update_job(job_id, status="processing", progress=99.0, stage="Embedding tags & artwork...")
+            elif "Merger" in postprocessor or "FFmpeg" in postprocessor:
+                job_manager.update_job(job_id, status="processing", progress=99.0, stage="Remuxing video & audio...")
+        elif status == 'finished':
+            job_manager.update_job(job_id, status="processing", progress=99.5, stage="Finalizing container...")
+
     opts: Dict[str, Any] = {
         'outtmpl': out_template,
         'quiet': True,
         'no_warnings': True,
         'progress_hooks': [progress_hook],
+        'postprocessor_hooks': [postprocessor_hook],
         'noplaylist': True,
         'extractor_args': {'youtube': {'player_client': ['web', 'default']}},
     }
@@ -153,7 +177,13 @@ def _sync_download(job_id: str, request: DownloadRequest):
         ydl.download([request.url])
 
 async def execute_download(job_id: str, request: DownloadRequest):
-    job_manager.update_job(job_id, status="extracting", stage="Initializing stream connection")
+    initial_stage = "Initializing stream connection"
+    if request.trim and request.trim.end > request.trim.start:
+        s_str = format_seconds(request.trim.start)
+        e_str = format_seconds(request.trim.end)
+        initial_stage = f"Trimming segment ({s_str} to {e_str})..."
+
+    job_manager.update_job(job_id, status="extracting", stage=initial_stage)
     loop = asyncio.get_running_loop()
 
     try:
