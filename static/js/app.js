@@ -36,17 +36,8 @@
   const $ = (selector) => document.querySelector(selector);
   const $$ = (selector) => document.querySelectorAll(selector);
 
-  // Screens
-  const screens = {
-    paste: $('#view-paste'),
-    choose: $('#view-choose'),
-    trim: $('#view-trim'),
-    subtitles: $('#view-subtitles'),
-    working: $('#view-working'),
-    ready: $('#view-ready'),
-    error: $('#view-error'),
-    offline: $('#view-offline')
-  };
+  // Active view screens
+  const ALL_SCREENS = ['paste', 'choose', 'working', 'ready', 'error', 'offline'];
 
   // --- Helper Utilities ---
   function formatSeconds(sec) {
@@ -62,7 +53,15 @@
   }
 
   function formatTimeMMSS(sec) {
-    return formatSeconds(sec);
+    if (isNaN(sec) || sec < 0) sec = 0;
+    sec = Math.round(sec);
+    const h = Math.floor(sec / 3600);
+    const m = Math.floor((sec % 3600) / 60);
+    const s = sec % 60;
+    if (h > 0) {
+      return `${h}:${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}`;
+    }
+    return `${m < 10 ? '0' : ''}${m}:${s < 10 ? '0' : ''}${s}`;
   }
 
   function parseTimeInput(val) {
@@ -113,9 +112,10 @@
 
   // --- Navigation & Router ---
   function showScreen(screenId) {
-    Object.keys(screens).forEach((key) => {
-      if (screens[key]) {
-        screens[key].classList.toggle('active', key === screenId);
+    ALL_SCREENS.forEach((key) => {
+      const el = $(`#view-${key}`);
+      if (el) {
+        el.classList.toggle('active', key === screenId);
       }
     });
     AppState.screen = screenId;
@@ -266,8 +266,8 @@
     // Text inputs (avoid clobbering input while user is actively typing)
     const ts = $('#t-start');
     const te = $('#t-end');
-    if (ts && document.activeElement !== ts) ts.value = formatSeconds(start);
-    if (te && document.activeElement !== te) te.value = formatSeconds(end);
+    if (ts && document.activeElement !== ts) ts.value = formatTimeMMSS(start);
+    if (te && document.activeElement !== te) te.value = formatTimeMMSS(end);
 
     // Duration displays
     const rStart = $('#ruler-start');
@@ -378,11 +378,15 @@
 
   // --- API Client: Metadata Inspection ---
   async function inspectUrl(url) {
-    $('#inspect-error').hidden = true;
-    $('#paste-input-container').classList.remove('bad');
+    const errEl = $('#inspect-error');
+    if (errEl) errEl.hidden = true;
+    const inpCont = $('#paste-input-container');
+    if (inpCont) inpCont.classList.remove('bad');
     const grabBtn = $('#btn-grab');
-    grabBtn.disabled = true;
-    grabBtn.textContent = 'Inspecting...';
+    if (grabBtn) {
+      grabBtn.disabled = true;
+      grabBtn.textContent = 'Inspecting...';
+    }
 
     try {
       const resp = await fetch(`${API_BASE}/info`, {
@@ -400,16 +404,34 @@
       AppState.metadata = data;
       AppState.currentUrl = url;
 
-      // Populate Chooser
+      // Always persist active media in sessionStorage for page refreshes & direct routing
+      try {
+        sessionStorage.setItem('mg_active_meta', JSON.stringify(data));
+        sessionStorage.setItem('mg_active_url', url);
+      } catch (e) {}
+
+      // If on landing page (/), navigate to /choose
+      if ($('#view-paste')) {
+        window.location.href = '/choose';
+        return;
+      }
+
+      // If already on /choose
       populateChooser(data);
       showScreen('choose');
     } catch (err) {
-      $('#paste-input-container').classList.add('bad');
-      $('#inspect-error').textContent = err.message || 'Unable to inspect URL.';
-      $('#inspect-error').hidden = false;
+      if (inpCont) inpCont.classList.add('bad');
+      if (errEl) {
+        errEl.textContent = err.message || 'Unable to inspect URL.';
+        errEl.hidden = false;
+      } else {
+        alert(err.message || 'Unable to inspect URL.');
+      }
     } finally {
-      grabBtn.disabled = false;
-      grabBtn.textContent = 'Grab';
+      if (grabBtn) {
+        grabBtn.disabled = false;
+        grabBtn.textContent = 'Grab';
+      }
     }
   }
 
@@ -570,24 +592,35 @@
     rowEl.classList.add('selected');
     AppState.subtitles.lang = lang;
     const txt = lang ? `${label || lang} · embedded in MP4` : 'None';
-    $('#subs-summary-text').textContent = txt;
-    $('#config-summary-captions').textContent = `Captions: ${txt}`;
+    const subSummary = $('#subs-summary-text');
+    if (subSummary) subSummary.textContent = txt;
+    const cfgCaptions = $('#config-summary-captions');
+    if (cfgCaptions) cfgCaptions.textContent = `Captions: ${txt}`;
   }
 
   // --- API Client: Download & SSE Pipeline ---
   async function startDownload() {
+    const targetUrl = AppState.currentUrl || (AppState.metadata && AppState.metadata.url) || '';
+    if (!targetUrl) {
+      showError('No media URL specified. Please go back and enter a valid URL.');
+      return;
+    }
+
+    const embedSubsEl = $('#check-embed-subs');
+    const isTrimmed = AppState.trim.active && (AppState.trim.start > 0 || AppState.trim.end < AppState.trim.total);
+
     const payload = {
-      url: AppState.currentUrl,
-      mode: AppState.mode,
-      quality: AppState.selectedQuality,
-      bitrate: AppState.selectedBitrate,
-      trim: (AppState.trim.start > 0 || AppState.trim.end < AppState.trim.total) ? {
-        start: AppState.trim.start,
-        end: AppState.trim.end
+      url: targetUrl,
+      mode: AppState.mode || 'mp4',
+      quality: AppState.selectedQuality || '1080p',
+      bitrate: AppState.selectedBitrate || 192,
+      trim: isTrimmed ? {
+        start: Math.round(AppState.trim.start),
+        end: Math.round(AppState.trim.end)
       } : null,
       subtitles: AppState.subtitles.lang ? {
         lang: AppState.subtitles.lang,
-        embed: $('#check-embed-subs').checked
+        embed: embedSubsEl ? embedSubsEl.checked : true
       } : null
     };
 
@@ -616,35 +649,71 @@
   }
 
   function resetWorkingScreen() {
-    $('#live-pct').innerHTML = '0<small>%</small>';
-    $('#live-bar-fill').style.width = '0%';
-    $('#live-clipper').style.left = '0%';
-    $('#live-speed').textContent = '-- MB/s';
-    $('#live-eta').textContent = '--:--';
-    $('#live-got').textContent = '-- / --';
+    try {
+      const livePct = $('#live-pct');
+      if (livePct) livePct.innerHTML = '0<small>%</small>';
+      const liveBar = $('#live-bar-fill');
+      if (liveBar) liveBar.style.width = '0%';
+      const liveClipper = $('#live-clipper');
+      if (liveClipper) liveClipper.style.left = '0%';
+      const liveSpeed = $('#live-speed');
+      if (liveSpeed) liveSpeed.textContent = '-- MB/s';
+      const liveEta = $('#live-eta');
+      if (liveEta) liveEta.textContent = '--:--';
+      const liveGot = $('#live-got');
+      if (liveGot) liveGot.textContent = '-- / --';
 
-    const track = $('.track');
-    if (track) track.classList.add('indeterminate');
+      const track = $('.track');
+      if (track) track.classList.add('indeterminate');
 
-    $$('#live-steps-list li').forEach((li) => {
-      li.className = 'todo';
-      li.style.display = '';
-      const st = li.querySelector('.st');
-      if (st) st.innerHTML = '';
-    });
-    setStepState('step-inspect', 'done');
-    setStepState('step-download', 'now');
+      $$('#live-steps-list li').forEach((li) => {
+        li.className = 'todo';
+        li.style.display = '';
+        const st = li.querySelector('.st');
+        if (st) st.innerHTML = '';
+      });
+      setStepState('step-inspect', 'done');
+      setStepState('step-download', 'now');
 
-    // Only display subtitles step if subtitles were configured
-    const stepSubs = $('#step-subtitles');
-    if (stepSubs) {
-      stepSubs.style.display = AppState.subtitles && AppState.subtitles.lang ? 'flex' : 'none';
+      // Only display subtitles step if subtitles were configured
+      const stepSubs = $('#step-subtitles');
+      if (stepSubs) {
+        stepSubs.style.display = AppState.subtitles && AppState.subtitles.lang ? 'flex' : 'none';
+      }
+
+      const workingFmt = $('#working-spec-format');
+      if (workingFmt) {
+        workingFmt.textContent = AppState.mode === 'mp4'
+          ? `MP4 · ${AppState.selectedQuality || '1080p'}`
+          : `MP3 · ${AppState.selectedBitrate || 192} kbps`;
+      }
+
+      const workingClip = $('#working-spec-clip');
+      if (workingClip) {
+        const isWhole = !AppState.trim.active || (AppState.trim.start === 0 && AppState.trim.end >= AppState.trim.total);
+        workingClip.textContent = isWhole
+          ? 'Whole video'
+          : `${formatSeconds(AppState.trim.start)} - ${formatSeconds(AppState.trim.end)} (${formatSeconds(AppState.trim.end - AppState.trim.start)})`;
+      }
+
+      if (AppState.metadata) {
+        const wTitle = $('#working-title');
+        if (wTitle) wTitle.textContent = AppState.metadata.title || 'Media';
+        const wDur = $('#working-duration');
+        if (wDur) wDur.textContent = formatSeconds(AppState.metadata.duration);
+        if (AppState.metadata.thumbnail) {
+          const wImg = $('#working-thumb-img');
+          const wPh = $('#working-thumb-ph');
+          if (wImg) {
+            wImg.src = AppState.metadata.thumbnail;
+            wImg.style.display = 'block';
+          }
+          if (wPh) wPh.style.display = 'none';
+        }
+      }
+    } catch (err) {
+      console.warn('resetWorkingScreen non-fatal error:', err);
     }
-
-    $('#working-spec-format').textContent = AppState.mode === 'mp4'
-      ? `MP4 · ${AppState.selectedQuality}`
-      : `MP3 · ${AppState.selectedBitrate} kbps`;
-    $('#working-spec-clip').textContent = $('#trim-summary-text').textContent;
   }
 
   function setStepState(stepId, state) {
@@ -700,21 +769,28 @@
     const pct = Math.min(100, Math.max(0, Math.round(rawPct)));
 
     const track = $('.track');
+    const livePct = $('#live-pct');
+    const liveBar = $('#live-bar-fill');
+    const liveClipper = $('#live-clipper');
+
     if (pct > 0) {
       if (track) track.classList.remove('indeterminate');
-      $('#live-pct').innerHTML = `${pct}<small>%</small>`;
-      $('#live-bar-fill').style.width = `${pct}%`;
-      $('#live-clipper').style.left = `${pct}%`;
+      if (livePct) livePct.innerHTML = `${pct}<small>%</small>`;
+      if (liveBar) liveBar.style.width = `${pct}%`;
+      if (liveClipper) liveClipper.style.left = `${pct}%`;
     } else {
       if (track) track.classList.add('indeterminate');
-      $('#live-pct').innerHTML = '0<small>%</small>';
-      $('#live-bar-fill').style.width = '0%';
-      $('#live-clipper').style.left = '0%';
+      if (livePct) livePct.innerHTML = '0<small>%</small>';
+      if (liveBar) liveBar.style.width = '0%';
+      if (liveClipper) liveClipper.style.left = '0%';
     }
 
-    if (data.speed) $('#live-speed').textContent = data.speed;
-    if (data.eta) $('#live-eta').textContent = data.eta;
-    if (data.got) $('#live-got').textContent = data.got;
+    const liveSpeed = $('#live-speed');
+    const liveEta = $('#live-eta');
+    const liveGot = $('#live-got');
+    if (data.speed && liveSpeed) liveSpeed.textContent = data.speed;
+    if (data.eta && liveEta) liveEta.textContent = data.eta;
+    if (data.got && liveGot) liveGot.textContent = data.got;
 
     // Advance Stage steps based on server state string
     const stage = (data.stage || '').toLowerCase();
@@ -740,9 +816,12 @@
   function handleComplete(data) {
     const track = $('.track');
     if (track) track.classList.remove('indeterminate');
-    $('#live-pct').innerHTML = '100<small>%</small>';
-    $('#live-bar-fill').style.width = '100%';
-    $('#live-clipper').style.left = '100%';
+    const livePct = $('#live-pct');
+    if (livePct) livePct.innerHTML = '100<small>%</small>';
+    const liveBar = $('#live-bar-fill');
+    if (liveBar) liveBar.style.width = '100%';
+    const liveClipper = $('#live-clipper');
+    if (liveClipper) liveClipper.style.left = '100%';
 
     setStepState('step-download', 'done');
     setStepState('step-process', 'done');
@@ -752,27 +831,83 @@
     setStepState('step-ready', 'done');
 
     // Populate Ready Screen
-    $('#ready-filename').textContent = data.filename || 'media-download';
-    $('#ready-spec-format').textContent = AppState.mode === 'mp4' ? `MP4 ${AppState.selectedQuality}` : `MP3 ${AppState.selectedBitrate} kbps`;
-    $('#ready-spec-duration').textContent = formatSeconds(AppState.trim.end - AppState.trim.start);
-    $('#ready-spec-size').textContent = data.size || '-- MB';
-    $('#ready-spec-captions').textContent = AppState.subtitles && AppState.subtitles.lang ? 'Embedded' : 'None';
+    const readyFn = $('#ready-filename');
+    if (readyFn) readyFn.textContent = data.filename || 'media-download';
+
+    const readySz = $('#ready-spec-size');
+    if (readySz) readySz.textContent = data.size || '-- MB';
+
+    const clipDur = (AppState.trim.end - AppState.trim.start) > 0
+      ? (AppState.trim.end - AppState.trim.start)
+      : (AppState.metadata ? AppState.metadata.duration : 0);
+
+    const readyDur = $('#ready-spec-duration');
+    if (readyDur) readyDur.textContent = formatSeconds(clipDur);
+
+    const readyClip = $('#ready-spec-clip');
+    if (readyClip) readyClip.textContent = formatSeconds(clipDur);
+
+    const modeLbl = $('#ready-recap-mode-label');
+    if (modeLbl) modeLbl.textContent = AppState.mode === 'mp4' ? 'Quality' : 'Bitrate';
+
+    const readyFmt = $('#ready-spec-format');
+    if (readyFmt) {
+      readyFmt.textContent = AppState.mode === 'mp4'
+        ? (AppState.selectedQuality || '1080p')
+        : `${AppState.selectedBitrate || 192} kbps`;
+    }
+
+    const readyCaps = $('#ready-spec-captions');
+    if (readyCaps) {
+      if (AppState.subtitles && AppState.subtitles.lang) {
+        const subsName = $('#subs-track-name')?.textContent || AppState.subtitles.lang;
+        readyCaps.textContent = `${subsName}, embedded`;
+      } else {
+        readyCaps.textContent = 'None';
+      }
+    }
+
+    const readyIcon = $('#ready-file-icon');
+    if (readyIcon) {
+      readyIcon.innerHTML = AppState.mode === 'mp3'
+        ? '<use href="#i-audio"/>'
+        : '<use href="#i-video"/>';
+    }
+
+    if (AppState.metadata && AppState.metadata.thumbnail) {
+      const rImg = $('#ready-thumb-img');
+      const rPh = $('#ready-thumb-ph');
+      if (rImg) {
+        rImg.src = AppState.metadata.thumbnail;
+        rImg.style.display = 'block';
+      }
+      if (rPh) rPh.style.display = 'none';
+    }
 
     const saveMediaBtn = $('#btn-save-media');
-    saveMediaBtn.href = data.download_url;
-    saveMediaBtn.setAttribute('download', data.filename || 'media');
-    $('#btn-save-label').textContent = `Save ${AppState.mode.toUpperCase()}`;
+    if (saveMediaBtn) {
+      saveMediaBtn.href = data.download_url;
+      saveMediaBtn.setAttribute('download', data.filename || 'media');
+    }
+    const saveLbl = $('#btn-save-label');
+    if (saveLbl) saveLbl.textContent = `Save ${AppState.mode.toUpperCase()}`;
 
     // Subtitle card if generated
+    const srtCard = $('#ready-srt-card');
+    const subsBtn = $('#btn-save-subtitles');
     if (data.srt_url) {
-      $('#ready-srt-card').hidden = false;
-      $('#ready-srt-filename').textContent = data.srt_filename || 'subtitles.srt';
-      const subsBtn = $('#btn-save-subtitles');
-      subsBtn.hidden = false;
-      subsBtn.onclick = () => { window.location.href = data.srt_url; };
+      if (srtCard) srtCard.hidden = false;
+      const srtFn = $('#ready-srt-filename');
+      if (srtFn) srtFn.textContent = data.srt_filename || 'subtitles.srt';
+      const srtSz = $('#ready-srt-size');
+      if (srtSz) srtSz.textContent = data.srt_size || '2.4 KB';
+      if (subsBtn) {
+        subsBtn.hidden = false;
+        subsBtn.onclick = () => { window.location.href = data.srt_url; };
+      }
     } else {
-      $('#ready-srt-card').hidden = true;
-      $('#btn-save-subtitles').hidden = true;
+      if (srtCard) srtCard.hidden = true;
+      if (subsBtn) subsBtn.hidden = true;
     }
 
     // Save to History
@@ -838,9 +973,12 @@
   function showError(msg) {
     if (AppState.eventSource) AppState.eventSource.close();
     if (AppState.pollTimer) clearInterval(AppState.pollTimer);
-    $('#error-desc-msg').textContent = msg || 'Could not process media stream.';
-    $('#error-details-text').textContent = `Details: ${msg || 'Unknown error'}`;
-    $('#error-url-retry').value = AppState.currentUrl;
+    const descEl = $('#error-desc-msg');
+    if (descEl) descEl.textContent = msg || 'Could not process media stream.';
+    const diagEl = $('#error-diag-detail') || $('#error-details-text');
+    if (diagEl) diagEl.textContent = `Details: ${msg || 'Unknown error'}`;
+    const retryInp = $('#error-url-retry');
+    if (retryInp) retryInp.value = AppState.currentUrl || '';
     showScreen('error');
   }
 
@@ -887,39 +1025,53 @@
   // --- Event Listeners Setup ---
   function setupEventListeners() {
     // Theme Switch
-    $('#btn-theme-flip').addEventListener('click', toggleTheme);
+    const btnTheme = $('#btn-theme-flip');
+    if (btnTheme) btnTheme.addEventListener('click', toggleTheme);
 
     // History Drawer
-    $('#btn-open-history').addEventListener('click', openHistoryDrawer);
-    $('#btn-close-history').addEventListener('click', closeHistoryDrawer);
-    $('#history-backdrop').addEventListener('click', closeHistoryDrawer);
-    $('#btn-clear-history').addEventListener('click', clearHistory);
+    const btnOpenHist = $('#btn-open-history');
+    if (btnOpenHist) btnOpenHist.addEventListener('click', openHistoryDrawer);
+    const btnCloseHist = $('#btn-close-history');
+    if (btnCloseHist) btnCloseHist.addEventListener('click', closeHistoryDrawer);
+    const histBackdrop = $('#history-backdrop');
+    if (histBackdrop) histBackdrop.addEventListener('click', closeHistoryDrawer);
+    const btnClearHist = $('#btn-clear-history');
+    if (btnClearHist) btnClearHist.addEventListener('click', clearHistory);
 
-    // Form Inspect
-    $('#form-inspect').addEventListener('submit', (e) => {
-      e.preventDefault();
-      const url = $('#input-url').value.trim();
-      if (url) inspectUrl(url);
-    });
+    // Form Inspect (Home page)
+    const formInspect = $('#form-inspect');
+    if (formInspect) {
+      formInspect.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const url = $('#input-url')?.value.trim();
+        if (url) inspectUrl(url);
+      });
+    }
 
-    // Format Switching
-    $('#btn-fmt-video').addEventListener('click', () => {
-      AppState.mode = 'mp4';
-      $('#btn-fmt-video').classList.add('active');
-      $('#btn-fmt-audio').classList.remove('active');
-      $('#pane-video').hidden = false;
-      $('#pane-audio').hidden = true;
-      updateActionButtonLabel();
-    });
+    // Format Switching (Choose page)
+    const btnFmtVid = $('#btn-fmt-video');
+    if (btnFmtVid) {
+      btnFmtVid.addEventListener('click', () => {
+        AppState.mode = 'mp4';
+        btnFmtVid.classList.add('active');
+        $('#btn-fmt-audio')?.classList.remove('active');
+        const pVid = $('#pane-video'); if (pVid) pVid.hidden = false;
+        const pAud = $('#pane-audio'); if (pAud) pAud.hidden = true;
+        updateActionButtonLabel();
+      });
+    }
 
-    $('#btn-fmt-audio').addEventListener('click', () => {
-      AppState.mode = 'mp3';
-      $('#btn-fmt-audio').classList.add('active');
-      $('#btn-fmt-video').classList.remove('active');
-      $('#pane-video').hidden = true;
-      $('#pane-audio').hidden = false;
-      updateActionButtonLabel();
-    });
+    const btnFmtAud = $('#btn-fmt-audio');
+    if (btnFmtAud) {
+      btnFmtAud.addEventListener('click', () => {
+        AppState.mode = 'mp3';
+        btnFmtAud.classList.add('active');
+        $('#btn-fmt-video')?.classList.remove('active');
+        const pVid = $('#pane-video'); if (pVid) pVid.hidden = true;
+        const pAud = $('#pane-audio'); if (pAud) pAud.hidden = false;
+        updateActionButtonLabel();
+      });
+    }
 
     // Audio Bitrate Selection
     $$('#audio-rows-grid .audio-row').forEach((row) => {
@@ -931,68 +1083,36 @@
       });
     });
 
-    // Step Navigations
-    $('#row-open-trim').addEventListener('click', () => {
-      const errEl = $('#trim-error');
-      if (errEl) errEl.hidden = true;
-      updateTrimUI();
-      showScreen('trim');
-    });
-    $('#btn-trim-back').addEventListener('click', () => showScreen('choose'));
-
-    $('#btn-trim-apply').addEventListener('click', () => {
-      const ts = $('#t-start');
-      const te = $('#t-end');
-      const s = parseTimeInput(ts ? ts.value : '');
-      const e = parseTimeInput(te ? te.value : '');
-      const total = AppState.trim.total || 60;
-
-      if (s === null || e === null || s < 0 || e <= s || e > total) {
-        const errEl = $('#trim-error');
-        if (errEl) {
-          errEl.textContent = `Invalid clip range. End must come after start and fit within ${formatSeconds(total)}.`;
-          errEl.hidden = false;
-        }
-        return;
-      }
-
-      const errEl = $('#trim-error');
-      if (errEl) errEl.hidden = true;
-      AppState.trim.start = s;
-      AppState.trim.end = e;
-      AppState.trim.active = (s > 0 || e < total);
-      updateTrimUI();
-      showScreen('choose');
-    });
-
-    $('#btn-trim-reset').addEventListener('click', () => {
-      AppState.trim.start = 0;
-      AppState.trim.end = AppState.trim.total;
-      AppState.trim.active = false;
-      const errEl = $('#trim-error');
-      if (errEl) errEl.hidden = true;
-      updateTrimUI();
-      showScreen('choose');
-    });
-
-    $('#row-open-subtitles').addEventListener('click', () => showScreen('subtitles'));
-    $('#btn-subs-back').addEventListener('click', () => showScreen('choose'));
-    $('#btn-subs-done').addEventListener('click', () => showScreen('choose'));
-    $('#btn-save-srt-instant').addEventListener('click', downloadInstantSrt);
+    // Subtitle Instant Download
+    const btnSrt = $('#btn-save-srt-instant');
+    if (btnSrt) {
+      btnSrt.addEventListener('click', downloadInstantSrt);
+    }
 
     // Trim Sliders
     const rs = $('#trim-s');
     const re = $('#trim-e');
     if (rs && re) {
+      const updateZIndex = (active) => {
+        if (active === 'start') {
+          rs.style.zIndex = '5';
+          re.style.zIndex = '4';
+        } else if (active === 'end') {
+          re.style.zIndex = '5';
+          rs.style.zIndex = '4';
+        }
+      };
+
       rs.addEventListener('input', () => {
         let v = parseInt(rs.value, 10);
+        if (isNaN(v)) v = 0;
         if (v >= AppState.trim.end) {
-          v = AppState.trim.end - 1;
+          v = Math.max(0, AppState.trim.end - 1);
           rs.value = v;
         }
         AppState.trim.start = Math.max(0, v);
-        rs.style.zIndex = '4';
-        re.style.zIndex = '3';
+        AppState.trim.active = (AppState.trim.start > 0 || AppState.trim.end < AppState.trim.total);
+        updateZIndex('start');
         const errEl = $('#trim-error');
         if (errEl) errEl.hidden = true;
         updateTrimUI('start');
@@ -1000,48 +1120,84 @@
 
       re.addEventListener('input', () => {
         let v = parseInt(re.value, 10);
+        if (isNaN(v)) v = AppState.trim.total;
         if (v <= AppState.trim.start) {
-          v = AppState.trim.start + 1;
+          v = Math.min(AppState.trim.total, AppState.trim.start + 1);
           re.value = v;
         }
         AppState.trim.end = Math.min(AppState.trim.total, v);
-        re.style.zIndex = '4';
-        rs.style.zIndex = '3';
+        AppState.trim.active = (AppState.trim.start > 0 || AppState.trim.end < AppState.trim.total);
+        updateZIndex('end');
         const errEl = $('#trim-error');
         if (errEl) errEl.hidden = true;
         updateTrimUI('end');
       });
+
+      rs.addEventListener('pointerdown', () => updateZIndex('start'));
+      re.addEventListener('pointerdown', () => updateZIndex('end'));
+      rs.addEventListener('focus', () => updateZIndex('start'));
+      re.addEventListener('focus', () => updateZIndex('end'));
     }
 
-    // Waveform click seeking
-    const waveBox = $('.wavebox');
-    if (waveBox) {
-      waveBox.addEventListener('click', (e) => {
-        if (e.target === rs || e.target === re) return;
-        const wave = $('.wave');
-        if (!wave) return;
-        const rect = wave.getBoundingClientRect();
-        const clientX = e.clientX;
-        if (clientX < rect.left || clientX > rect.right) return;
+    // Waveform seeking & scrubbing
+    const waveEl = $('.wave');
+    if (waveEl) {
+      let activeDragHandle = null;
+
+      const seekFromPointer = (clientX) => {
+        const rect = waveEl.getBoundingClientRect();
+        if (rect.width <= 0) return;
         const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-        const clickedSec = Math.round(ratio * AppState.trim.total);
-        const distToStart = Math.abs(clickedSec - AppState.trim.start);
-        const distToEnd = Math.abs(clickedSec - AppState.trim.end);
-        if (distToStart < distToEnd) {
-          if (clickedSec < AppState.trim.end) {
-            AppState.trim.start = clickedSec;
-            if (rs) rs.style.zIndex = '4';
-            if (re) re.style.zIndex = '3';
-            updateTrimUI();
+        const total = AppState.trim.total || 1;
+        const clickedSec = Math.round(ratio * total);
+
+        if (!activeDragHandle) {
+          const distToStart = Math.abs(clickedSec - AppState.trim.start);
+          const distToEnd = Math.abs(clickedSec - AppState.trim.end);
+          activeDragHandle = (distToStart < distToEnd) ? 'start' : 'end';
+        }
+
+        if (activeDragHandle === 'start') {
+          AppState.trim.start = Math.min(clickedSec, Math.max(0, AppState.trim.end - 1));
+          if (rs) {
+            rs.value = AppState.trim.start;
+            rs.style.zIndex = '5';
+            if (re) re.style.zIndex = '4';
           }
         } else {
-          if (clickedSec > AppState.trim.start) {
-            AppState.trim.end = clickedSec;
-            if (re) re.style.zIndex = '4';
-            if (rs) rs.style.zIndex = '3';
-            updateTrimUI();
+          AppState.trim.end = Math.max(clickedSec, Math.min(total, AppState.trim.start + 1));
+          if (re) {
+            re.value = AppState.trim.end;
+            re.style.zIndex = '5';
+            if (rs) rs.style.zIndex = '4';
           }
         }
+
+        AppState.trim.active = (AppState.trim.start > 0 || AppState.trim.end < AppState.trim.total);
+        const errEl = $('#trim-error');
+        if (errEl) errEl.hidden = true;
+        updateTrimUI();
+      };
+
+      const onPointerMove = (e) => {
+        if (!activeDragHandle) return;
+        seekFromPointer(e.clientX);
+      };
+
+      const onPointerUp = () => {
+        activeDragHandle = null;
+        window.removeEventListener('pointermove', onPointerMove);
+        window.removeEventListener('pointerup', onPointerUp);
+        window.removeEventListener('pointercancel', onPointerUp);
+      };
+
+      waveEl.addEventListener('pointerdown', (e) => {
+        if (e.target === rs || e.target === re) return;
+        activeDragHandle = null;
+        seekFromPointer(e.clientX);
+        window.addEventListener('pointermove', onPointerMove);
+        window.addEventListener('pointerup', onPointerUp);
+        window.addEventListener('pointercancel', onPointerUp);
       });
     }
 
@@ -1068,48 +1224,115 @@
     };
     if (ts) {
       ts.addEventListener('change', handleInputCommit);
-      ts.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); handleInputCommit(); } });
+      ts.addEventListener('blur', handleInputCommit);
+      ts.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); ts.blur(); } });
     }
     if (te) {
       te.addEventListener('change', handleInputCommit);
-      te.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); handleInputCommit(); } });
+      te.addEventListener('blur', handleInputCommit);
+      te.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); te.blur(); } });
     }
 
     // Start Download Button
-    $('#btn-start-download').addEventListener('click', startDownload);
-    $('#btn-choose-back').addEventListener('click', () => showScreen('paste'));
+    const btnStart = $('#btn-start-download');
+    if (btnStart) btnStart.addEventListener('click', startDownload);
+
+    const btnChooseBack = $('#btn-choose-back');
+    if (btnChooseBack) {
+      btnChooseBack.addEventListener('click', () => {
+        window.location.href = '/';
+      });
+    }
 
     // Cancel Download Button
-    $('#btn-cancel-download').addEventListener('click', () => {
-      if (AppState.eventSource) AppState.eventSource.close();
-      if (AppState.pollTimer) clearInterval(AppState.pollTimer);
-      showScreen('choose');
-    });
+    const btnCancel = $('#btn-cancel-download');
+    if (btnCancel) {
+      btnCancel.addEventListener('click', () => {
+        if (AppState.eventSource) AppState.eventSource.close();
+        if (AppState.pollTimer) clearInterval(AppState.pollTimer);
+        showScreen('choose');
+      });
+    }
 
     // Grab Another Link
-    $('#btn-grab-another').addEventListener('click', () => {
-      $('#input-url').value = '';
-      showScreen('paste');
-    });
-    $('#btn-error-retry').addEventListener('click', () => showScreen('paste'));
-    $('#btn-offline-retry').addEventListener('click', () => {
-      if (navigator.onLine) showScreen('paste');
-      else alert('Still offline. Please check your network connection.');
-    });
+    const btnGrabAnother = $('#btn-grab-another');
+    if (btnGrabAnother) {
+      btnGrabAnother.addEventListener('click', () => {
+        try {
+          sessionStorage.removeItem('mg_active_meta');
+          sessionStorage.removeItem('mg_active_url');
+        } catch (e) {}
+        window.location.href = '/';
+      });
+    }
+
+    const btnErrorRetry = $('#btn-error-retry');
+    if (btnErrorRetry) {
+      btnErrorRetry.addEventListener('click', () => {
+        window.location.href = '/';
+      });
+    }
+
+    const btnOfflineRetry = $('#btn-offline-retry');
+    if (btnOfflineRetry) {
+      btnOfflineRetry.addEventListener('click', () => {
+        if (navigator.onLine) {
+          if ($('#view-choose')) showScreen('choose');
+          else if ($('#view-paste')) showScreen('paste');
+        } else {
+          alert('Still offline. Please check your network connection.');
+        }
+      });
+    }
 
     // Brand Home link
-    $('#brand-home').addEventListener('click', (e) => {
-      e.preventDefault();
-      showScreen('paste');
-    });
+    const brandHome = $('#brand-home');
+    if (brandHome) {
+      brandHome.addEventListener('click', (e) => {
+        if (!$('#view-paste')) {
+          // If on choose page, allow default link action to navigate home
+          return;
+        }
+        e.preventDefault();
+        showScreen('paste');
+      });
+    }
 
     // Connectivity Status
     window.addEventListener('online', () => {
-      if (AppState.screen === 'offline') showScreen('paste');
+      if (AppState.screen === 'offline') {
+        if ($('#view-choose')) showScreen('choose');
+        else if ($('#view-paste')) showScreen('paste');
+      }
     });
     window.addEventListener('offline', () => {
       showScreen('offline');
     });
+  }
+
+  // --- Choose Page Initializer ---
+  function initChoosePage() {
+    let meta = null;
+    let url = '';
+    try {
+      const raw = sessionStorage.getItem('mg_active_meta');
+      if (raw) meta = JSON.parse(raw);
+      url = sessionStorage.getItem('mg_active_url') || '';
+    } catch (e) {}
+
+    const urlParams = new URLSearchParams(window.location.search);
+    const queryUrl = urlParams.get('url');
+
+    if (meta) {
+      AppState.metadata = meta;
+      AppState.currentUrl = url || meta.url || '';
+      populateChooser(meta);
+      showScreen('choose');
+    } else if (queryUrl) {
+      inspectUrl(queryUrl);
+    } else {
+      window.location.href = '/';
+    }
   }
 
   // --- PWA Service Worker & Install Prompt ---
@@ -1158,6 +1381,10 @@
     renderHistory();
     setupEventListeners();
     initPWA();
+
+    if ($('#view-choose')) {
+      initChoosePage();
+    }
 
     if (!navigator.onLine) {
       showScreen('offline');

@@ -12,6 +12,16 @@ async def test_pwa_root_endpoints():
         assert resp.status_code == 200
         assert "<title>MediaGrab</title>" in resp.text
 
+        # Choose HTML
+        resp = await client.get("/choose")
+        assert resp.status_code == 200
+        assert "Configure Media" in resp.text
+        assert 'id="view-choose"' in resp.text
+
+        resp = await client.get("/choose.html")
+        assert resp.status_code == 200
+        assert "Configure Media" in resp.text
+
         # Manifest
         resp = await client.get("/manifest.webmanifest")
         assert resp.status_code == 200

@@ -1,8 +1,10 @@
-const CACHE_NAME = 'mediagrab-shell-v1';
+const CACHE_NAME = 'mediagrab-shell-v2';
 
 const STATIC_ASSETS = [
   '/',
   '/index.html',
+  '/choose',
+  '/choose.html',
   '/css/app.css',
   '/js/app.js',
   '/manifest.webmanifest',

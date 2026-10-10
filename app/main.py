@@ -69,7 +69,12 @@ async def serve_favicon():
         media_type="image/svg+xml"
     )
 
-# Root SPA endpoint
+# Root SPA endpoints
 @app.get("/", include_in_schema=False)
 async def serve_index():
     return FileResponse(STATIC_DIR / "index.html", media_type="text/html")
+
+@app.get("/choose", include_in_schema=False)
+@app.get("/choose.html", include_in_schema=False)
+async def serve_choose():
+    return FileResponse(STATIC_DIR / "choose.html", media_type="text/html")
