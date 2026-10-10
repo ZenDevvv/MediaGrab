@@ -324,7 +324,12 @@ svg .t-hill-f { fill: var(--ink); fill-opacity: 0.12; }
   text-decoration: underline wavy var(--bad);
   text-underline-offset: 4px;
 }
-.err-line { color: var(--bad); font-size: 13px; padding-inline: 18px; margin-top: -8px; }
+.err-line {
+  color: var(--bad);
+  font: 500 13px/1.4 var(--font-body);
+  padding-inline: 18px;
+  margin-top: 10px;
+}
 
 /* Cards & Sidepanels */
 .sidepanel {

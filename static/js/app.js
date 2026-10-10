@@ -408,7 +408,8 @@
 
     // Initialize Trim boundaries
     AppState.trim.total = data.duration || 60;
-    const urlTime = extractUrlTimestamp(url);
+    const targetUrl = AppState.currentUrl || (data && data.url) || '';
+    const urlTime = extractUrlTimestamp(targetUrl);
     if (urlTime !== null && urlTime < AppState.trim.total) {
       AppState.trim.start = urlTime;
       AppState.trim.end = AppState.trim.total;

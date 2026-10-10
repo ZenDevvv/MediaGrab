@@ -69,3 +69,18 @@ async def test_api_events_stream():
             async for chunk in stream_resp.aiter_text():
                 assert "event: progress" in chunk
                 break
+
+@pytest.mark.asyncio
+async def test_static_assets_integrity():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # Check app.js is served and doesn't contain undeclared references
+        resp_js = await client.get("/js/app.js")
+        assert resp_js.status_code == 200
+        assert "extractUrlTimestamp(targetUrl)" in resp_js.text or "extractUrlTimestamp" in resp_js.text
+        assert "extractUrlTimestamp(url)" not in resp_js.text
+
+        # Check app.css err-line has positive margin to prevent overlapping pill border
+        resp_css = await client.get("/css/app.css")
+        assert resp_css.status_code == 200
+        assert "margin-top: 10px;" in resp_css.text
