@@ -45,6 +45,14 @@ def base_ytdl_opts(
     if config.YTDLP_COOKIES_PATH:
         opts["cookiefile"] = config.YTDLP_COOKIES_PATH
 
+    # Egress proxy. The root fix for YouTube's datacenter-IP bot check.
+    if config.YTDLP_PROXY:
+        opts["proxy"] = config.YTDLP_PROXY
+
+    # TLS impersonation. Measured worse on a datacenter IP, so opt-in only.
+    if config.YTDLP_IMPERSONATE:
+        opts["impersonate"] = config.YTDLP_IMPERSONATE
+
     if outtmpl:
         opts["outtmpl"] = outtmpl
     if progress_hooks:

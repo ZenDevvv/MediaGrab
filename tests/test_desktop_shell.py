@@ -666,3 +666,23 @@ def test_cookie_path_is_configurable_and_not_committed():
     assert "cookiefile" in src
     # No literal cookie path or contents in the repo.
     assert "cookies.txt" not in Path("app/config.py").read_text()
+
+
+def test_youtube_egress_levers_are_configurable():
+    """Cookie, proxy and impersonation are the three real levers; all opt-in."""
+    cfg = Path("app/config.py").read_text()
+    src = Path("app/services/ytdlp_opts.py").read_text()
+
+    for var in ("MEDIA_GRAB_YTDLP_COOKIES", "MEDIA_GRAB_YTDLP_PROXY",
+                "MEDIA_GRAB_YTDLP_IMPERSONATE"):
+        assert var in cfg, f"{var} must be configurable"
+
+    assert "cookiefile" in src
+    assert '"proxy"' in src, "Egress proxy is the root fix for the bot check"
+    assert "impersonate" in src
+
+    # Measured worse on a datacenter IP, so it must not default on.
+    assert 'YTDLP_IMPERSONATE = os.getenv("MEDIA_GRAB_YTDLP_IMPERSONATE") or None' in cfg
+    # No literal proxy or cookie values committed (comments may show format).
+    assignments = [l for l in cfg.splitlines() if "YTDLP_PROXY = os.getenv" in l]
+    assert assignments and "socks5" not in assignments[0]

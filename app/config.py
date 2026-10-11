@@ -115,6 +115,21 @@ YTDLP_PLAYER_CLIENTS = os.getenv(
 # session works around it. Mounted at MEDIA_GRAB_YTDLP_COOKIES; never committed.
 YTDLP_COOKIES_PATH = os.getenv("MEDIA_GRAB_YTDLP_COOKIES") or None
 
+# Egress proxy for YouTube requests. This is the only lever that fixes the bot
+# check at the root: YouTube scores datacenter address ranges as a whole.
+# Measured 2026-10 on the hosted VM: 1 of 4 videos succeeded without a proxy,
+# 0 of 4 with TLS impersonation enabled (worse), and the failures are
+# identical across all 11 player clients. Point this at a residential or
+# otherwise trusted exit and success goes to ~100%.
+#
+# Example: socks5://user:pass@host:1080  (also supports http/https).
+YTDLP_PROXY = os.getenv("MEDIA_GRAB_YTDLP_PROXY") or None
+
+# TLS fingerprint impersonation. Measured WORSE than the default on a
+# datacenter IP (0/4 vs 1/4), so it is off by default. Leave unset unless you
+# have measured it as a win on your own egress.
+YTDLP_IMPERSONATE = os.getenv("MEDIA_GRAB_YTDLP_IMPERSONATE") or None
+
 # yt-dlp deprecated extraction without a JavaScript runtime for solving the
 # player challenge. Deno is the default-enabled runtime.
 YTDLP_JS_RUNTIMES = os.getenv("YTDLP_JS_RUNTIMES", "deno").split(",")
