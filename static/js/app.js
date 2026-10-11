@@ -819,12 +819,22 @@
     return `${hours % 1 === 0 ? hours : hours.toFixed(1)} hr`;
   }
 
+  // Spelled out for running prose. formatRetention returns the terse "60s"/"5 min"
+// used in labels, which reads badly mid-sentence.
+  function retentionPhrase(seconds) {
+    const s = Math.max(1, Math.round(Number(seconds) || 0));
+    if (s < 120) return `${s} second${s === 1 ? '' : 's'}`;
+    if (s < 3600) return `${Math.round(s / 60)} minute${Math.round(s / 60) === 1 ? '' : 's'}`;
+    const h = Math.round(s / 3600);
+    return `${h} hour${h === 1 ? '' : 's'}`;
+  }
+
   function renderRetentionCopy() {
     const label = formatRetention(AppState.retentionSeconds);
     const side = $('#retention-side-label');
-    if (side) side.textContent = `Cleared after ${label}`;
+    if (side) side.textContent = `Auto-deletes ${label} after save`;
     const drawer = $('#retention-drawer-note');
-    if (drawer) drawer.textContent = `Saved in this browser · Server clears files after ${label}`;
+    if (drawer) drawer.textContent = `Saved in this browser · Server copy deleted ${label} after you save`;
   }
 
   function initPromoStrip() {
@@ -1374,20 +1384,39 @@
     }
   }
 
-  function renderRetentionNotice() {
+  // Render one of the notice's three states. `title` is bold and short; `text`
+  // explains the consequence. `timerHTML` carries the ticking clock.
+  function setRetentionState(state, title, text, timerHTML) {
     const notice = $('#ready-retention-notice');
-    const text = $('#ready-retention-text');
-    if (!notice || !text) return;
-    notice.hidden = false;
+    const titleEl = $('#ready-retention-title');
+    const textEl = $('#ready-retention-text');
+    if (!notice) return;
 
+    notice.hidden = false;
+    notice.classList.remove('is-idle', 'is-counting', 'is-done');
+    notice.classList.add(`is-${state}`);
+    if (titleEl) titleEl.innerHTML = title;
+    if (textEl) textEl.textContent = text;
+    if (timerHTML && titleEl) titleEl.innerHTML = title.replace('%timer%', timerHTML);
+  }
+
+  function renderRetentionNotice() {
     // A new job supersedes any countdown still running from a previous one.
     if (isHostedMode()) {
-      text.innerHTML =
-        '<b>Ephemeral server:</b> this file is deleted from the server after you save it. ' +
-        'Save it now &mdash; it will not be kept.';
+      setRetentionState(
+        'idle',
+        'Ephemeral by design',
+        `This file is deleted from the server ${retentionPhrase(AppState.retentionSeconds)} after you save. Nothing is kept here.`,
+        ''
+      );
     } else {
       // Desktop writes to the user's own machine; there is nothing to count down.
-      text.innerHTML = '<b>Saved to your Downloads folder.</b> This file stays on your machine.';
+      setRetentionState(
+        'idle',
+        'Saved to your Downloads folder',
+        'This file stays on your machine. Nothing is uploaded or kept on a server.',
+        ''
+      );
     }
   }
 
@@ -1397,21 +1426,28 @@
     stopDeletionCountdown();
 
     const notice = $('#ready-retention-notice');
-    const text = $('#ready-retention-text');
-    if (!notice || !text) return;
+    if (!notice) return;
 
-    notice.hidden = false;
     let left = Math.max(1, Math.round(seconds));
-    text.innerHTML =
-      `<b>Saving now.</b> This file is deleted from the server in ` +
-      `<b id="ready-deletion-timer">${formatTimeMMSS(left)}</b>.`;
+
+    setRetentionState(
+      'counting',
+      'Saved to your device%timer%',
+      "The server's copy is deleted when the timer ends. Your downloaded file is not affected.",
+      `<span class="save-notice-timer" id="ready-deletion-timer">${formatTimeMMSS(left)}</span>`
+    );
 
     AppState.deletionTimer = setInterval(() => {
       left--;
       const timer = $('#ready-deletion-timer');
       if (left <= 0) {
         stopDeletionCountdown();
-        text.innerHTML = '<b>File deleted.</b> The server no longer has a copy.';
+        setRetentionState(
+          'done',
+          'Deleted from our server',
+          "The server's copy is gone. The file you saved is still on your device.",
+          ''
+        );
         return;
       }
       if (timer) timer.textContent = formatTimeMMSS(left);

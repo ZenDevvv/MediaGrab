@@ -241,7 +241,9 @@ const LONG_META = {
     check('no countdown before save',
       await ev(`!!document.querySelector('#ready-deletion-timer')`), false);
 
-    const noticeText = await ev(`document.querySelector('#ready-retention-text')?.textContent || ''`);
+    // The notice now carries a title and a body, so assert against the whole
+    // component rather than a single element.
+    const noticeText = await ev(`document.querySelector('#ready-retention-notice')?.textContent || ''`);
     if (hosted) {
       check('hosted notice mentions the server', noticeText.includes('deleted from the server'), true);
       check('hosted notice avoids the wrong referent', noticeText.includes('this machine'), false);

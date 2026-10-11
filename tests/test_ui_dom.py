@@ -284,3 +284,77 @@ def test_e2e_youtube_upsell_card(live_server):
     # Guard against the two silent failure modes: a dead CTA, or a card that
     # claims YouTube is fully down when some links still work.
     assert "/api/info" in result.stdout
+
+
+# --- Ephemeral notice + countdown (§ design-system pass) -------------------
+
+def test_ico_has_intrinsic_size():
+    """An SVG with no width/height fills its container.
+
+    The retention clock rendered ~230px wide inside a one-line notice because
+    .ico only declared stroke properties.
+    """
+    with open("static/css/app.css", "r", encoding="utf-8") as f:
+        css = f.read()
+    rule = css[css.index(".ico {"):css.index("}", css.index(".ico {"))]
+    assert "width:" in rule and "height:" in rule
+    assert "flex: none" in rule
+
+
+def test_retention_notice_has_three_states():
+    with open("static/choose.html", "r", encoding="utf-8") as f:
+        html = f.read()
+    assert 'id="ready-retention-notice"' in html
+    assert 'id="ready-retention-title"' in html
+    assert 'id="ready-retention-text"' in html
+    assert 'class="save-notice-ico"' in html
+
+    with open("static/js/app.js", "r", encoding="utf-8") as f:
+        js = f.read()
+    for state in ("is-idle", "is-counting", "is-done"):
+        assert f"'{state}'" in js, state
+
+
+def test_retention_notice_avoids_the_muddy_accent_soft_fill():
+    """--accent-soft is a dark olive in dark theme and reads as disabled."""
+    with open("static/css/app.css", "r", encoding="utf-8") as f:
+        css = f.read()
+    start = css.index(".save-notice {")
+    end = css.index("/* The ticking clock", start)
+    block = css[start:end]
+    assert "background: var(--accent-soft)" not in block
+    assert "background: var(--card)" in block
+
+
+def test_countdown_timer_is_stable_and_legible():
+    with open("static/css/app.css", "r", encoding="utf-8") as f:
+        css = f.read()
+    start = css.index(".save-notice-timer {")
+    block = css[start:css.index("}", start)]
+    # Monospaced tabular figures so the pill does not jitter on every tick.
+    assert "font-variant-numeric: tabular-nums" in block
+    assert "var(--font-mono)" in block
+    # On-colour token, not a hardcoded white: dark theme inverts --bad to a
+    # light tint where white text would be unreadable.
+    assert "var(--on-bad)" in block
+    assert "#fff" not in block
+
+
+def test_on_color_tokens_exist_for_both_themes():
+    with open("static/css/app.css", "r", encoding="utf-8") as f:
+        css = f.read()
+    assert "--on-bad:" in css
+    assert "--on-ok:" in css
+    # Defined for the dark theme as well, not just the light default.
+    assert css.count("--on-bad:") >= 2
+    assert css.count("--on-ok:") >= 2
+
+
+def test_retention_copy_is_human_readable():
+    with open("static/js/app.js", "r", encoding="utf-8") as f:
+        js = f.read()
+    # Running prose spells the duration out; the terse form stays in labels.
+    assert "retentionPhrase" in js
+    assert "deleted from the server" in js
+    # The old copy implied the file is deleted before it is saved.
+    assert "after you save it. Save it now" not in js

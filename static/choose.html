@@ -336,11 +336,17 @@
           </dl>
           <!-- Ephemeral notice. The countdown intentionally starts only when the
                user saves, matching the server-side purge-on-retrieval behaviour
-               (§1.2 Decision #8). Desktop mode shows a no-timer confirmation. -->
-          <p class="save-notice" id="ready-retention-notice" hidden>
-            <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7.5V12l3 2"/></svg>
-            <span id="ready-retention-text"></span>
-          </p>
+               (§1.2 Decision #8). Desktop mode shows a no-timer confirmation.
+               Three states share this component: idle, counting, done. -->
+          <div class="save-notice is-idle" id="ready-retention-notice" hidden>
+            <span class="save-notice-ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24" class="ico"><circle cx="12" cy="12" r="9"/><path d="M12 7.5V12l3 2"/></svg>
+            </span>
+            <div class="save-notice-body">
+              <p class="save-notice-title" id="ready-retention-title"></p>
+              <p class="save-notice-text" id="ready-retention-text"></p>
+            </div>
+          </div>
         </aside>
       </div>
     </section>
