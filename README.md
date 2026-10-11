@@ -105,9 +105,25 @@ MEDIAGRAB_MODE=hosted BEHIND_PROXY=true uv run uvicorn app.main:app --port 8000
 
 Enable guardrails, zero retention, and the native-app promo strip.
 
-### Configuration
+### Documentation
 
-All settings are environment variables (see `app/config.py`):
+| Document | Purpose |
+|---|---|
+| [`PRD.md`](./PRD.md) | Product requirements: users, features, what is explicitly out of scope, open risks |
+| [`ARCHITECTURE.md`](./ARCHITECTURE.md) | How the system works as built: components, request lifecycle, retention, security |
+| [`MULTI_PLATFORM_IMPLEMENTATION_PLAN.md`](./MULTI_PLATFORM_IMPLEMENTATION_PLAN.md) | Ambiguity-gate decisions (§1–§1.4) and milestone roadmap |
+| [`DESIGN.md`](./DESIGN.md) | Visual design system and tokens |
+
+> **Working with this codebase:** read `PRD.md` and `ARCHITECTURE.md` first.
+> `MULTI_PLATFORM_IMPLEMENTATION_PLAN.md` §1 records *why* decisions were made —
+> several designs that look arbitrary (session-first gating, retention disabled
+> on desktop, purge-on-retrieval rather than on-completion) are deliberate
+> reversals of earlier choices, and reverting them reintroduces bugs that were
+> found and fixed.
+
+## Configuration
+
+All settings are environment variables (see `app/config.py`). Copy `.env.example` to `.env` for local reference — **`.env` is gitignored and must never be committed.**
 
 | Variable | Default | Purpose |
 |---|---|---|
