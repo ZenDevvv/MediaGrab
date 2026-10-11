@@ -36,23 +36,33 @@ python -m PyInstaller packaging/MediaGrab.spec --noconfirm --distpath dist
 
 ### Run it
 
+**Windows:** download `MediaGrab-Windows.zip`, extract it, double-click `MediaGrab.exe`.
+
+**Linux:** download `MediaGrab-Linux-x86_64.tar.gz`, extract it, run `./MediaGrab/MediaGrab`.
+
+No configuration, environment variables, or setup of any kind is required — the launcher sets its own safe defaults, finds your Downloads folder automatically, and bundles FFmpeg.
+
 ```bash
-./dist/MediaGrab/MediaGrab                  # opens a window
-./dist/MediaGrab/MediaGrab --no-browser     # headless, useful for smoke tests
-./dist/MediaGrab/MediaGrab --no-native      # skip pywebview, use Chromium --app
+# Optional flags
+./MediaGrab --no-browser     # backend only, no window (smoke tests)
+./MediaGrab --no-native      # skip the native window, use a Chromium/Edge window
 ```
 
 Downloads are written **directly to your Downloads folder** with a clean filename and automatic de-duplication (`Title.mp4`, `Title (1).mp4`). Nothing is deleted on desktop.
 
+> The release downloads are a `.zip` / `.tar.gz` because PyInstaller produces a
+> folder-based bundle. The `.exe` on its own will not run — it requires the
+> `_internal` directory beside it.
+
 ### Window fallback
 
-The launcher degrades rather than failing: `pywebview` (native) → Chromium/Chrome `--app` → default browser. If PyGObject is unavailable or ABI-mismatched against your Python, the app still runs.
+The launcher degrades rather than failing: `pywebview` (native, uses the WebView2 runtime built into Windows) → Chromium/Edge app window → default browser. If none of these are available the app still runs, opening in your browser.
 
 > **Note on the native window:** `pywebview` requires PyGObject (`gi`) matching your Python version. On many Linux systems `gi` is built for the system Python, which may differ from a virtualenv's. If the native window fails to open, use `--no-native` — functionality is identical.
 
 ### Current limitations
 
-- **No installer yet.** There is no AppImage, `.desktop` entry, or `install.sh`; you extract and run. True one-click Linux installation is future work.
+- **No installer yet.** You download, extract, and run. There is no `Setup.exe`, AppImage, or Start Menu entry. That is acceptable for extraction but not yet a true one-click install.
 - **No published releases yet**, so download links from a hosted instance do not currently resolve.
 - **Licensing:** the bundled FFmpeg is a **GPL-3.0** build (BtbN). Redistributing these binaries carries GPL-3.0 obligations. Do not publish binaries until this is resolved.
 

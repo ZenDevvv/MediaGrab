@@ -36,27 +36,59 @@ jobs:
       - name: Build
         run: pyinstaller packaging/MediaGrab.spec --noconfirm --distpath dist --workpath build
 
+      - name: Verify bundle completeness
+        shell: pwsh
+        run: |
+          # A missing _internal folder produces an .exe that starts and dies.
+          # Fail the build here rather than shipping it.
+          $internal = "dist\MediaGrab\_internal"
+          if (-not (Test-Path $internal)) { throw "Missing _internal directory" }
+          $files = (Get-ChildItem $internal -Recurse -File)
+          Write-Host "Bundle contains $($files.Count) files, $([math]::Round(($files | Measure-Object Length -Sum).Sum/1MB)) MB"
+          if ($files.Count -lt 100) { throw "Bundle looks incomplete ($($files.Count) files)" }
+          if (-not (Test-Path "$internal\ffmpeg\ffmpeg.exe")) {
+            Write-Host "WARNING: bundled ffmpeg.exe missing; merge/MP3 will fail"
+          }
+          if (-not (Test-Path "dist\MediaGrab\MediaGrab.exe")) { throw "Executable missing" }
+
       - name: Smoke test backend starts
         shell: pwsh
         run: |
           $exe = "dist\MediaGrab\MediaGrab.exe"
-          if (-not (Test-Path $exe)) { throw "Executable not produced" }
           $p = Start-Process -FilePath $exe -ArgumentList "--no-browser","--port","8099" -PassThru
-          Start-Sleep -Seconds 15
+          Start-Sleep -Seconds 20
           try {
             $r = Invoke-WebRequest -Uri "http://127.0.0.1:8099/api/capabilities" -UseBasicParsing -TimeoutSec 10
             if ($r.StatusCode -ne 200) { throw "Backend returned $($r.StatusCode)" }
             if ($r.Content -notmatch '"desktop"') { throw "Unexpected capabilities payload" }
-            Write-Host "Smoke test passed"
+            # Proves yt-dlp's dynamically-imported extractors survived freezing,
+            # which is the classic PyInstaller failure for yt-dlp.
+            $i = Invoke-WebRequest -Uri "http://127.0.0.1:8099/api/info" -Method POST `
+              -ContentType "application/json" -UseBasicParsing -TimeoutSec 45 `
+              -Body '{"url":"https://www.youtube.com/watch?v=dQw4w9WgXcQ"}'
+            if ($i.Content -notmatch '"duration"') { throw "yt-dlp extractors not bundled correctly" }
+            Write-Host "Smoke test passed (backend + yt-dlp extractors)"
           } finally {
             if (-not $p.HasExited) { $p.Kill() }
           }
+
+      - name: Package
+        run: |
+          # PyInstaller builds an onedir layout: the .exe alone is NOT
+          # runnable, it needs the sibling _internal folder. Attaching the bare
+          # .exe produced a download that could not start, so ship a zip of the
+          # whole bundle instead.
+          Compress-Archive -Path dist/MediaGrab -DestinationPath MediaGrab-Windows.zip
+          (Get-FileHash MediaGrab-Windows.zip -Algorithm SHA256).Hash.ToLower() `
+            | Out-File -Encoding ascii MediaGrab-Windows.zip.sha256
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: MediaGrab-Windows
-          path: dist/MediaGrab/
+          path: |
+            MediaGrab-Windows.zip
+            MediaGrab-Windows.zip.sha256
           retention-days: 14
 
       - name: Attach to release
@@ -64,8 +96,9 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/MediaGrab/MediaGrab.exe
-          fail_on_unmatched_files: false
+            MediaGrab-Windows.zip
+            MediaGrab-Windows.zip.sha256
+          fail_on_unmatched_files: true
 
   linux:
     name: Linux (tar.gz)

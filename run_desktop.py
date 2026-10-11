@@ -151,6 +151,25 @@ def find_chromium() -> Optional[str]:
         found = shutil.which(name)
         if found:
             return found
+
+    # Windows: browsers installed normally are not on PATH, so probe the
+    # standard locations. Edge is preinstalled on Windows 11 and auto-installed
+    # on Windows 10, which makes it the reliable last-resort GUI on a clean
+    # machine. Without this a non-technical user with no Chromium hits the
+    # external-browser fallback and loses the app window.
+    if sys.platform == "win32":
+        for base in (os.environ.get("PROGRAMFILES"), os.environ.get("PROGRAMFILES(X86)")):
+            if not base:
+                continue
+            for rel in (
+                r"Microsoft\Edge\Application\msedge.exe",
+                r"Google\Chrome\Application\chrome.exe",
+                r"BraveSoftware\Brave-Browser\Application\brave.exe",
+            ):
+                candidate = Path(base) / rel
+                if candidate.exists():
+                    return str(candidate)
+
     # macOS app bundles
     if sys.platform == "darwin":
         for path in (

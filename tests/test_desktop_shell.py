@@ -454,3 +454,58 @@ def test_ffmpeg_spec_entry_warns_when_dir_is_empty():
     """An empty ffmpeg/ must be loud at build time, not silent at runtime."""
     spec = Path("packaging/MediaGrab.spec").read_text(encoding="utf-8")
     assert "run packaging/fetch_ffmpeg.py before building" in spec
+
+
+# --- Zero-config distribution guarantees ----------------------------------
+
+def test_windows_release_ships_the_whole_bundle():
+    """The .exe alone cannot run; the release must ship a zip of the bundle."""
+    import yaml
+
+    wf = yaml.safe_load(Path(".github/workflows/build-desktop.yml").read_text())
+    steps = yaml.safe_dump(wf["jobs"]["windows"])
+
+    # A bare .exe attachment is the defect this guards against.
+    assert "dist/MediaGrab/MediaGrab.exe" not in steps, \
+        "Releasing the bare .exe produces a download that cannot start"
+    assert "MediaGrab-Windows.zip" in steps
+    assert "Compress-Archive" in steps
+
+
+def test_windows_build_verifies_bundle_and_extractors():
+    """CI must fail on an incomplete bundle or missing yt-dlp extractors."""
+    import yaml
+
+    wf = yaml.safe_load(Path(".github/workflows/build-desktop.yml").read_text())
+    steps = yaml.safe_dump(wf["jobs"]["windows"])
+    assert "_internal" in steps, "Bundle completeness is not verified"
+    assert "api/info" in steps, "yt-dlp extractor bundling is not verified"
+    assert "ffmpeg.exe" in steps
+
+
+def test_pythonnet_present_for_windows_gui():
+    """pywebview needs pythonnet on Windows or the native window cannot open."""
+    reqs = Path("requirements.txt").read_text()
+    assert "pywebview" in reqs
+    assert "pythonnet" in reqs, \
+        "Windows build would ship without pythonnet and cannot open a window"
+
+
+def test_find_chromium_probes_windows_install_locations():
+    """Edge is preinstalled but is not on PATH; without probing, a clean
+    Windows machine with no Chromium falls through to the external browser."""
+    from pathlib import Path as P
+
+    src = P("run_desktop.py").read_text(encoding="utf-8")
+    assert "PROGRAMFILES" in src
+    assert "msedge.exe" in src
+    assert "chrome.exe" in src
+
+
+def test_launcher_requires_no_user_configuration():
+    """A non-technical user must never be asked to set anything."""
+    src = Path("run_desktop.py").read_text(encoding="utf-8")
+    assert "input(" not in src, "Launcher must not prompt the user"
+    # Defaults are set internally rather than demanded from the environment.
+    for var in ("MEDIAGRAB_MODE", "RETENTION_ENABLED", "USER_FACING_FILENAMES"):
+        assert f'os.environ.setdefault("{var}"' in src
