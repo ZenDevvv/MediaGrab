@@ -694,6 +694,7 @@ def test_cookie_install_script_is_safe_and_validating():
     """Cookies are a live credential: validate format, lock permissions."""
     script = Path("deploy/install-cookies.sh").read_text()
     assert "install -m 600" in script, "Cookie file must be 0600"
+    assert "mkdir -p" in script, "Must create the cookie dir on a fresh host"
     assert "-o root -g root" in script
     assert "Netscape" in script, "Must reject a file that is not cookies.txt"
     assert "does not look like" in script

@@ -28,8 +28,11 @@ status() {
   else
     log "not configured"
   fi
-  if [ -s "$COOKIE_FILE" ]; then
-    log "cookie file present: $COOKIE_FILE ($(sudo wc -l < "$COOKIE_FILE") lines, mode $(sudo stat -c %a "$COOKIE_FILE"))"
+  # sudo is required to stat the file: it is 0600 root-owned by design.
+  if sudo test -s "$COOKIE_FILE"; then
+    LINES="$(sudo wc -l "$COOKIE_FILE" 2>/dev/null | awk '{print $1}' || true)"
+    LINES="${LINES:-?}"
+    log "cookie file present: $COOKIE_FILE ($LINES lines, mode $(sudo stat -c %a "$COOKIE_FILE"))"
   else
     log "no cookie file at $COOKIE_FILE"
   fi
@@ -60,6 +63,10 @@ case "$ACTION" in
       fi
     fi
     log "Installing cookie file"
+    # The directory may not exist on a fresh host; provisioning creates the
+    # env file but not necessarily this one.
+    sudo mkdir -p "$COOKIE_DIR"
+    sudo chmod 700 "$COOKIE_DIR"
     sudo install -m 600 -o root -g root "$SRC" "$COOKIE_FILE"
     if sudo grep -q "^MEDIA_GRAB_YTDLP_COOKIES=" "$ENV_FILE" 2>/dev/null; then
       sudo sed -i "s|^MEDIA_GRAB_YTDLP_COOKIES=.*|MEDIA_GRAB_YTDLP_COOKIES=$COOKIE_FILE|" "$ENV_FILE"
