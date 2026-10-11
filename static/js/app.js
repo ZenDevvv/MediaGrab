@@ -511,9 +511,14 @@
         body: JSON.stringify({ url })
       });
 
+      if (resp.status === 451) {
+        showUpstreamBlocked(detailPayload(await resp.json().catch(() => ({}))));
+        return;
+      }
       if (!resp.ok) {
         const errData = await resp.json().catch(() => ({}));
-        throw new Error(errData.detail || 'Failed to inspect link.');
+        const payload = detailPayload(errData);
+        throw new Error(payload.message || 'Failed to inspect link.');
       }
 
       const data = await resp.json();
@@ -1014,10 +1019,14 @@
         // prompt. Surfacing it verbatim preserves the conversion moment instead
         // of flattening it into a generic failure (§1.2 Decision #11).
         if (resp.status === 429) {
-          showRateLimited(err.detail || 'Too many concurrent downloads. Please wait and try again.');
+          showRateLimited(detailPayload(err).message || 'Too many concurrent downloads. Please wait and try again.');
           return;
         }
-        throw new Error(err.detail || 'Download request rejected.');
+        if (resp.status === 451) {
+          showUpstreamBlocked(detailPayload(err));
+          return;
+        }
+        throw new Error(detailPayload(err).message || 'Download request rejected.');
       }
 
       const data = await resp.json();
@@ -1465,7 +1474,57 @@
     }
   }
 
-  function showError(msg) {
+  // Upstream refused this server's address (YouTube bot check). Retrying or
+    // changing options cannot help, so route to the native-app upsell instead
+    // of a dead-end error.
+    function showUpstreamBlocked(payload) {
+      if (AppState.eventSource) AppState.eventSource.close();
+      if (AppState.pollTimer) clearInterval(AppState.pollTimer);
+
+      showScreen('choose');
+
+      const msg = (payload && payload.message) ||
+        'This site is blocking requests from our server. The native app downloads from your own connection.';
+
+      const banner = $('#trim-limit-banner');
+      const text = $('#trim-limit-text');
+      if (banner && text) {
+        text.textContent = msg;
+        banner.hidden = false;
+        banner.classList.remove('over');
+      }
+
+      const hint = $('#error-upgrade-hint');
+      if (hint) {
+        const hintText = $('#error-upgrade-text');
+        if (hintText) hintText.textContent = msg;
+        hint.hidden = false;
+        const cta = $('#error-upgrade-cta');
+        if (cta) {
+          const downloads = (AppState.capabilities && AppState.capabilities.downloads) || {};
+          const target = PLATFORM_TARGETS.find((t) => t.key === detectPlatform()) || PLATFORM_TARGETS[0];
+          const url = downloads[target.id];
+          if (isRealDownload(url)) {
+            cta.href = url;
+            cta.removeAttribute('aria-disabled');
+            cta.hidden = false;
+          } else {
+            cta.href = '/downloads';
+            cta.hidden = false;
+          }
+        }
+      }
+    }
+
+    // Read the structured detail the API returns, tolerating a plain string.
+    function detailPayload(body) {
+      if (body && typeof body === 'object' && body.detail !== undefined) {
+        return typeof body.detail === 'string' ? { message: body.detail } : body.detail;
+      }
+      return { message: typeof body === 'string' ? body : '' };
+    }
+
+    function showError(msg) {
     if (AppState.eventSource) AppState.eventSource.close();
     if (AppState.pollTimer) clearInterval(AppState.pollTimer);
     const descEl = $('#error-desc-msg');
@@ -1500,7 +1559,7 @@
           // "Subtitles unavailable." (§1.2 Decision #11).
           btn.disabled = false;
           btn.textContent = 'Save .srt';
-          showRateLimited((await resp.json().catch(() => ({}))).detail || 'Too many concurrent downloads.');
+          showRateLimited(detailPayload(await resp.json().catch(() => ({}))).message || 'Too many concurrent downloads.');
           return;
         }
         throw new Error('Subtitles unavailable.');

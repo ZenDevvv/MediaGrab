@@ -21,7 +21,7 @@ from app.api.schemas import (
     LimitsResponse,
 )
 from app.config import CLEANUP_GRACE_SECONDS, ORPHAN_MAX_AGE_SECONDS
-from app.services.extractor import inspect_url
+from app.services.extractor import inspect_url, UpstreamBotCheck
 from app.services.jobs import job_manager
 from app.services.downloader import execute_download
 from app.services.cleaner import deferred_file_removal
@@ -77,6 +77,12 @@ async def api_info(req: InfoRequest, request: Request):
     # its guardrail checks instead of paying a second extraction.
     try:
         response = await inspect_url(req.url)
+    except UpstreamBotCheck as e:
+        raise HTTPException(status_code=451, detail={
+            "code": e.code,
+            "message": str(e),
+            "remedy": "native_app",
+        })
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -127,6 +133,12 @@ async def api_download(req: DownloadRequest, request: Request, response: Respons
         await load_and_validate(req)
     except GuardrailError as e:
         raise HTTPException(status_code=e.status_code, detail=e.detail)
+    except UpstreamBotCheck as e:
+        raise HTTPException(status_code=451, detail={
+            "code": e.code,
+            "message": str(e),
+            "remedy": "native_app",
+        })
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:

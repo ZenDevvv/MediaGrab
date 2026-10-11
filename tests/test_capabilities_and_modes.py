@@ -965,3 +965,42 @@ def test_job_response_exposes_queue_fields():
     resp = manager.get_job(job.id).to_response()
     assert resp.queue_position == 2
     assert resp.active_slots == 3
+
+# --- Upstream bot-check handling ------------------------------------------
+
+def test_upstream_botcheck_is_distinct_from_a_bad_url():
+    from app.services.extractor import UpstreamBotCheck
+    import yt_dlp
+
+    assert issubclass(UpstreamBotCheck, ValueError)
+    assert UpstreamBotCheck.code == "UPSTREAM_BLOCKED"
+
+
+@pytest.mark.asyncio
+async def test_botcheck_returns_451_with_native_app_remedy(monkeypatch):
+    """A blocked upstream address must not look like a malformed URL."""
+    from app.api import routes as routes_mod
+    from app.services.extractor import UpstreamBotCheck
+
+    async def blocked(url):
+        raise UpstreamBotCheck("YouTube is blocking requests from this server's address.")
+
+    monkeypatch.setattr(routes_mod, "inspect_url", blocked)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as client:
+        resp = await client.post("/api/info", json={"url": "https://youtube.com/watch?v=x"})
+
+    assert resp.status_code == 451
+    detail = resp.json()["detail"]
+    assert detail["code"] == "UPSTREAM_BLOCKED"
+    assert detail["remedy"] == "native_app"
+    assert "blocking" in detail["message"]
+
+
+def test_frontend_routes_451_to_the_upsell_not_the_error_screen():
+    with open("static/js/app.js", "r", encoding="utf-8") as f:
+        js = f.read()
+    assert "showUpstreamBlocked" in js
+    assert "resp.status === 451" in js
+    assert "detailPayload" in js

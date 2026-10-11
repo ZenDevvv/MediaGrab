@@ -6,6 +6,19 @@ from app.services.ytdlp_opts import base_ytdl_opts
 
 COMMON_RESOLUTIONS = [2160, 1440, 1080, 720, 480, 360]
 
+
+class UpstreamBotCheck(ValueError):
+    """The upstream site refused this server's address (YouTube bot check).
+
+    Distinct from a bad URL: retrying, trimming or changing quality cannot
+    help. The only fixes are a different egress address or the client running
+    the request from the user's own network, so callers should surface this as
+    an upgrade path rather than an error.
+    """
+
+    #: Machine-readable marker used by the frontend to pick the upsell copy.
+    code = "UPSTREAM_BLOCKED"
+
 def _sync_extract_info(url: str) -> Dict[str, Any]:
     ydl_opts = base_ytdl_opts(skip_download=True, extra={
         'extract_flat': False,
@@ -124,6 +137,18 @@ async def inspect_url(url: str) -> InfoResponse:
             raise ValueError("This video is private.")
         elif "Video unavailable" in msg:
             raise ValueError("This video is unavailable.")
+        elif "Sign in to confirm" in msg or "not a bot" in msg:
+            # YouTube refuses anonymous requests from this server's address.
+            # Measured on the hosted VM: identical across all 11 player
+            # clients, unchanged by a JS runtime, worse with TLS
+            # impersonation, and unchanged on yt-dlp nightly. It is address
+            # reputation, so the honest remedy is to run the request from the
+            # user's own connection -- which is exactly what the native apps do.
+            raise UpstreamBotCheck(
+                "YouTube is blocking requests from this server's address, so this "
+                "link can't be read here. The Desktop and Android apps download from "
+                "your own connection, where this restriction doesn't apply."
+            )
         raise ValueError(f"Unable to read link: {msg.split('ERROR:')[-1].strip()}")
     except Exception as e:
         raise ValueError(f"Metadata extraction failed: {str(e)}")
