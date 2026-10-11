@@ -8,6 +8,7 @@ from app import config
 from app.api.schemas import DownloadRequest
 from app.config import DOWNLOADS_DIR
 from app.services.jobs import job_manager
+from app.services.ytdlp_opts import base_ytdl_opts
 
 
 class DownloadCancelled(Exception):
@@ -242,7 +243,9 @@ def create_ydl_opts(
         'noplaylist': True,
         'concurrent_fragment_downloads': 4,
         'buffersize': 1024 * 1024,
-        'extractor_args': {'youtube': {'player_client': ['web', 'default']}},
+        # Client, cookie and JS-runtime policy is shared with the extractor so
+        # an inspect can never succeed where the download then fails.
+        **base_ytdl_opts(),
     }
 
     # In-flight size backstop. yt-dlp evaluates this per stream, so it is a

@@ -45,7 +45,9 @@ def test_create_ydl_opts_mp4():
     assert opts['subtitleslangs'] == ['en']
     assert opts['concurrent_fragment_downloads'] == 4
     assert opts['buffersize'] == 1024 * 1024
-    assert opts['extractor_args']['youtube']['player_client'] == ['web', 'default']
+    clients = opts['extractor_args']['youtube']['player_client']
+    # PO-token-dependent clients must not be present.
+    assert 'web' not in clients and 'mweb' not in clients
 
 def test_create_ydl_opts_mp3():
     req = DownloadRequest(

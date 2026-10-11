@@ -635,3 +635,34 @@ def test_tunnel_is_not_coupled_to_app_restarts():
         "Requires= couples tunnel lifetime to the app and churns the public URL"
     assert any(d.startswith("Wants=") and "mediagrab" in d for d in directives), \
         "Must still order after the app without coupling lifetimes"
+
+
+def test_ytdlp_client_and_runtime_policy():
+    """YouTube client/JS-runtime policy is centralised and PO-token safe."""
+    src = Path("app/services/ytdlp_opts.py").read_text()
+    cfg = Path("app/config.py").read_text()
+
+    assert "base_ytdl_opts" in src, "Extractor and downloader must share yt-dlp options"
+    assert "player_client" in src
+    # A JS runtime is required; yt-dlp deprecates extraction without one.
+    assert "js_runtimes" in src
+    assert "YTDLP_JS_RUNTIMES" in cfg
+
+    # web/mweb require a PO token for GVS and fail without one.
+    default_line = [l for l in cfg.splitlines() if "YTDLP_PLAYER_CLIENTS" in l and "os.getenv" in l]
+    assert default_line, "Player clients must be configurable"
+    assert '"tv_embedded,default,android_vr"' in cfg
+
+    # Both call sites use the shared builder, so they cannot drift.
+    assert "base_ytdl_opts()" in Path("app/services/downloader.py").read_text()
+    assert "base_ytdl_opts(" in Path("app/services/extractor.py").read_text()
+
+
+def test_cookie_path_is_configurable_and_not_committed():
+    """YouTube cookies must come from config and never be committed."""
+    cfg = Path("app/config.py").read_text()
+    assert "MEDIA_GRAB_YTDLP_COOKIES" in cfg
+    src = Path("app/services/ytdlp_opts.py").read_text()
+    assert "cookiefile" in src
+    # No literal cookie path or contents in the repo.
+    assert "cookies.txt" not in Path("app/config.py").read_text()

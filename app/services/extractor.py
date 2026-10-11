@@ -2,18 +2,14 @@ import asyncio
 from typing import Dict, Any, List
 import yt_dlp
 from app.api.schemas import InfoResponse, QualityOption, SubtitleOption
+from app.services.ytdlp_opts import base_ytdl_opts
 
 COMMON_RESOLUTIONS = [2160, 1440, 1080, 720, 480, 360]
 
 def _sync_extract_info(url: str) -> Dict[str, Any]:
-    ydl_opts = {
-        'skip_download': True,
+    ydl_opts = base_ytdl_opts(skip_download=True, extra={
         'extract_flat': False,
-        'quiet': True,
-        'no_warnings': True,
-        'noplaylist': True,
-        'extractor_args': {'youtube': {'player_client': ['web', 'default']}},
-    }
+    })
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         return ydl.extract_info(url, download=False)
 

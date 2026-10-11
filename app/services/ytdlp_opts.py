@@ -1,0 +1,57 @@
+"""Shared yt-dlp option construction.
+
+Client selection, cookies and JS runtime policy are identical for metadata
+extraction and downloading, so they live in one place. Divergence between the
+two is how you end up with an inspect that succeeds and a download that fails.
+"""
+
+from typing import Any, Dict, Optional
+
+from app import config
+
+__all__ = ["base_ytdl_opts", "player_clients"]
+
+
+def player_clients() -> list:
+    clients = [c.strip() for c in config.YTDLP_PLAYER_CLIENTS if c.strip()]
+    return clients or ["default"]
+
+
+def base_ytdl_opts(
+    *,
+    quiet: bool = True,
+    skip_download: bool = False,
+    progress_hooks=None,
+    postprocessor_hooks=None,
+    outtmpl: Optional[str] = None,
+    extra: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Options shared by the extractor and the downloader."""
+    opts: Dict[str, Any] = {
+        "quiet": quiet,
+        "no_warnings": True,
+        "noplaylist": True,
+        "skip_download": skip_download,
+        "extractor_args": {"youtube": {"player_client": player_clients()}},
+    }
+
+    # Without a JS runtime yt-dlp cannot solve the player challenge and warns
+    # that extraction is deprecated; on some videos it is the difference
+    # between formats and an error.
+    runtimes = [r.strip() for r in config.YTDLP_JS_RUNTIMES if r.strip()]
+    if runtimes:
+        opts["js_runtimes"] = {name: {} for name in runtimes}
+
+    if config.YTDLP_COOKIES_PATH:
+        opts["cookiefile"] = config.YTDLP_COOKIES_PATH
+
+    if outtmpl:
+        opts["outtmpl"] = outtmpl
+    if progress_hooks:
+        opts["progress_hooks"] = progress_hooks
+    if postprocessor_hooks:
+        opts["postprocessor_hooks"] = postprocessor_hooks
+    if extra:
+        opts.update(extra)
+
+    return opts

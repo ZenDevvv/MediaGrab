@@ -92,4 +92,8 @@ def test_sync_extract_info_opts(monkeypatch):
 
     assert res["title"] == "Mock Video"
     assert captured_opts["skip_download"] is True
-    assert captured_opts["extractor_args"]["youtube"]["player_client"] == ["web", "default"]
+    # "web"/"mweb" require a PO token for GVS and fail without one, so they
+    # must not be in the client list. See config.YTDLP_PLAYER_CLIENTS.
+    clients = captured_opts["extractor_args"]["youtube"]["player_client"]
+    assert "web" not in clients and "mweb" not in clients
+    assert "default" in clients

@@ -97,6 +97,28 @@ HOSTED_LOCKED_RESOLUTIONS = ["1440p", "2160p"]
 METADATA_CACHE_TTL_SECONDS = int(os.getenv("METADATA_CACHE_TTL_SECONDS", "300"))
 METADATA_CACHE_MAX_ENTRIES = int(os.getenv("METADATA_CACHE_MAX_ENTRIES", "128"))
 
+# --- YouTube extraction ---------------------------------------------------
+# Player clients, tried in order. Deliberately excludes "web" and "mweb":
+# both now require a Proof-of-Origin (PO) token for GVS format requests and
+# fail outright with "Requested format is not available" when one is absent.
+# Listing them wastes a round trip and can mask a working fallback.
+#
+# Measured on a datacenter IP (2026-10): default and tv_embedded return the full
+# format list; android_vr is a cheap last resort with fewer formats.
+YTDLP_PLAYER_CLIENTS = os.getenv(
+    "YTDLP_PLAYER_CLIENTS", "tv_embedded,default,android_vr"
+).split(",")
+
+# Cookies file for YouTube. On a datacenter IP YouTube increasingly answers
+# "Sign in to confirm you're not a bot" regardless of client or JS runtime --
+# that is IP reputation, and only a logged-out cookie set from a real client
+# session works around it. Mounted at MEDIA_GRAB_YTDLP_COOKIES; never committed.
+YTDLP_COOKIES_PATH = os.getenv("MEDIA_GRAB_YTDLP_COOKIES") or None
+
+# yt-dlp deprecated extraction without a JavaScript runtime for solving the
+# player challenge. Deno is the default-enabled runtime.
+YTDLP_JS_RUNTIMES = os.getenv("YTDLP_JS_RUNTIMES", "deno").split(",")
+
 # --- Distribution ---------------------------------------------------------
 GITHUB_RELEASES_URL = os.getenv(
     "GITHUB_RELEASES_URL", "https://github.com/ZenDevvv/MediaGrab/releases/latest"
