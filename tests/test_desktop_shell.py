@@ -619,5 +619,19 @@ def test_tunnel_unit_is_committed_and_loopback_only():
     unit = Path("deploy/mg-tunnel.service").read_text()
     assert "127.0.0.1:8000" in unit, "Tunnel must target loopback"
     assert "0.0.0.0" not in unit
-    assert "Requires=mediagrab.service" in unit, "Tunnel must depend on the app"
     assert "cloudflared" in unit
+
+
+def test_tunnel_is_not_coupled_to_app_restarts():
+    """Regression: Requires= made every app restart churn the public URL.
+
+    Stopping mediagrab stopped the tunnel, which re-registered under a new
+    random trycloudflare hostname and broke every shared link (Error 1033).
+    """
+    unit = Path("deploy/mg-tunnel.service").read_text()
+    directives = [l.strip() for l in unit.splitlines()
+                  if l.strip() and not l.strip().startswith("#")]
+    assert not any(d.startswith("Requires=") for d in directives), \
+        "Requires= couples tunnel lifetime to the app and churns the public URL"
+    assert any(d.startswith("Wants=") and "mediagrab" in d for d in directives), \
+        "Must still order after the app without coupling lifetimes"

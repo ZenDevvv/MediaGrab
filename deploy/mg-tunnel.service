@@ -1,8 +1,11 @@
 [Unit]
 Description=MediaGrab public tunnel (Cloudflare quick tunnel)
 After=network-online.target mediagrab.service
-Wants=network-online.target
-Requires=mediagrab.service
+Wants=network-online.target mediagrab.service
+# Deliberately NOT Requires=. With Requires, restarting mediagrab stops the
+# tunnel too, and a quick tunnel then re-registers under a NEW random hostname,
+# breaking every link already shared. Wants/After keep ordering without that
+# coupling: the tunnel survives an app restart and simply reconnects.
 
 [Service]
 Type=simple
