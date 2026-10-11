@@ -97,6 +97,16 @@ HOSTED_LOCKED_RESOLUTIONS = ["1440p", "2160p"]
 METADATA_CACHE_TTL_SECONDS = int(os.getenv("METADATA_CACHE_TTL_SECONDS", "300"))
 METADATA_CACHE_MAX_ENTRIES = int(os.getenv("METADATA_CACHE_MAX_ENTRIES", "128"))
 
+# --- YouTube request posture (§1.5 Decision #17) --------------------------
+# The hosted VM's egress is refused by YouTube for most videos. Probing on every
+# visitor attempt would generate one failed request per visitor and can escalate
+# the address from "challenged" to "hard blocked", so the server probes at most
+# once per cooldown window. Desktop mode is never affected: the user's own IP is
+# not blocked, and the caps are unlimited regardless.
+YOUTUBE_COOLDOWN_SECONDS = int(
+    os.getenv("MEDIA_GRAB_YOUTUBE_COOLDOWN_SECONDS", "1800")
+)
+
 # --- YouTube extraction ---------------------------------------------------
 # Player clients, tried in order. Deliberately excludes "web" and "mweb":
 # both now require a Proof-of-Origin (PO) token for GVS format requests and

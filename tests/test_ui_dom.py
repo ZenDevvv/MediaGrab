@@ -217,3 +217,70 @@ def test_e2e_hosted_ui_gating(mode, request):
         f"Hosted UI E2E ({mode}) failed:\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
     )
     assert "SUCCESS" in result.stdout
+
+
+# --- YouTube upsell card (§1.5 Decisions #18-19) --------------------------
+
+@pytest.mark.parametrize("page", ["index.html", "choose.html"])
+def test_upsell_card_is_present_and_hidden_by_default(page):
+    with open(f"static/{page}", "r", encoding="utf-8") as f:
+        html = f.read()
+    # Present on both the landing and configure screens, but not shown until
+    # the server actually refuses.
+    assert html.count('id="yt-upsell"') == 1
+    assert 'id="yt-upsell"' in html
+    assert 'id="yt-upsell" hidden' in html
+    # Actionable: a real CTA, a dismiss affordance, and an id the JS targets.
+    assert 'id="yt-upsell-cta"' in html
+    assert 'id="yt-upsell-dismiss"' in html
+    assert 'id="yt-upsell-text"' in html
+    assert 'id="yt-upsell-cta-label"' in html
+    # Honest fallback copy, and it points somewhere real rather than "#".
+    assert "1,700+ other sites work right now" in html
+    assert 'href="/downloads"' in html
+
+
+def test_upsell_styling_reuses_the_design_system_tokens():
+    with open("static/css/app.css", "r", encoding="utf-8") as f:
+        css = f.read()
+    block_start = css.index(".yt-upsell {")
+    block_end = css.index("/* Main App Container */", block_start)
+    block = css[block_start:block_end]
+
+    # --card surface plus a hard edge shadow: a highlight in both themes,
+    # unlike .limit-banner's accent-soft fill which reads as disabled in dark.
+    assert "var(--card)" in block
+    assert "var(--accent)" in block
+    assert "var(--edge)" in block
+    assert "border-radius" in block
+    assert "var(--font-display)" in block
+    assert "var(--font-body)" in block
+    # Must not collapse when toggled via the hidden attribute.
+    assert ".yt-upsell[hidden] { display: none; }" in block
+
+
+def test_upsell_never_renders_without_a_usable_cta():
+    """The dead-end failure mode: a card with no way forward."""
+    with open("static/js/app.js", "r", encoding="utf-8") as f:
+        js = f.read()
+    start = js.index("function showYouTubeUpsell")
+    body = js[start:js.index("function hideYouTubeUpsell", start)]
+    # Falls back to the downloads page when no real binary is published yet.
+    assert "isRealDownload(url)" in body
+    assert "'/downloads'" in body
+
+
+def test_e2e_youtube_upsell_card(live_server):
+    """The blocked-link upsell, in a real browser against a genuine 451 payload."""
+    if not shutil.which("chromium") or not shutil.which("node"):
+        pytest.skip("chromium or node not found in PATH")
+
+    result = _run_node_script("tests/e2e_youtube_upsell.mjs", live_server)
+
+    assert result.returncode == 0, (
+        f"YouTube upsell E2E failed:\nSTDOUT:\n{result.stdout}\nSTDERR:\n{result.stderr}"
+    )
+    assert "SUCCESS" in result.stdout
+    # Guard against the two silent failure modes: a dead CTA, or a card that
+    # claims YouTube is fully down when some links still work.
+    assert "/api/info" in result.stdout

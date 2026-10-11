@@ -352,6 +352,71 @@ svg .t-hill-f { fill: var(--ink); fill-opacity: 0.12; }
   font-size: 13px;
 }
 
+/* YouTube upsell card (§1.5 Decision #18)
+   Uses the hard-shadow card vocabulary rather than .limit-banner's accent-soft
+   fill: at card size the soft fill reads as "disabled" in dark theme, where
+   --accent-soft is a dark olive. A --card surface with the accent reserved for
+   the icon chip keeps it a highlight in both themes. */
+.yt-upsell {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  margin-top: 14px;
+  padding: 16px 18px;
+  background: var(--card);
+  border: 1.5px solid var(--edge);
+  border-radius: 12px;
+  box-shadow: 3px 3px 0 var(--edge);
+}
+.yt-upsell[hidden] { display: none; }
+.yt-upsell-ico {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: var(--accent);
+  border: 1.5px solid var(--edge);
+}
+.yt-upsell-ico svg {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: var(--ink);
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.yt-upsell-body { min-width: 0; }
+.yt-upsell-title {
+  font: 700 16px/1.3 var(--font-display);
+  letter-spacing: -0.01em;
+  margin: 0 0 4px;
+}
+.yt-upsell-text {
+  font: 400 13.5px/1.5 var(--font-body);
+  color: var(--ink);
+  margin: 0;
+  max-width: 46ch;
+}
+.yt-upsell-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+.yt-upsell-actions .btn { text-decoration: none; }
+.yt-upsell-foot {
+  font: 500 12px/1.45 var(--font-body);
+  color: var(--muted);
+  margin: 10px 0 0;
+}
+@media (max-width: 560px) {
+  .yt-upsell { padding: 14px; gap: 11px; box-shadow: 2px 2px 0 var(--edge); }
+  .yt-upsell-title { font-size: 15px; }
+}
+
 /* Main App Container */
 .main-wrap {
   flex: 1;

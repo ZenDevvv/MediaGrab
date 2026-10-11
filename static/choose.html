@@ -103,6 +103,30 @@
                 <div class="limit-banner" id="trim-limit-banner" hidden>
                   <span id="trim-limit-text"></span>
                 </div>
+
+<!-- YouTube upsell (§1.5 Decision #18) -->
+              <div class="yt-upsell" id="yt-upsell" hidden>
+                <div class="yt-upsell-ico" aria-hidden="true">
+                  <svg viewBox="0 0 24 24"><path d="M12 3v12m0 0 4.5-4.5M12 15l-4.5-4.5M5 20h14"/></svg>
+                </div>
+                <div class="yt-upsell-body">
+                  <h3 class="yt-upsell-title">YouTube needs a hand here</h3>
+                  <p class="yt-upsell-text" id="yt-upsell-text">
+                    YouTube limits requests from shared servers, so most links won&rsquo;t work on this
+                    instance. The native app downloads from your own connection &mdash; no limits,
+                    no waiting.
+                  </p>
+                  <div class="yt-upsell-actions">
+                    <a class="btn btn-primary btn-sm" id="yt-upsell-cta" href="/downloads">
+                      <span id="yt-upsell-cta-label">Get the app</span>
+                    </a>
+                    <button class="btn btn-quiet btn-sm" id="yt-upsell-dismiss" type="button">
+                      Use another site
+                    </button>
+                  </div>
+                  <p class="yt-upsell-foot">Vimeo, TikTok, SoundCloud, Reddit and 1,700+ other sites work right now.</p>
+                </div>
+              </div>
                 <div class="bars" id="trim-bars-container" aria-hidden="true"></div>
                 <input class="rng" id="trim-s" type="range" min="0" max="100" step="1" value="0" aria-label="Start time">
                 <input class="rng" id="trim-e" type="range" min="0" max="100" step="1" value="100" aria-label="End time">

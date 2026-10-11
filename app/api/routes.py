@@ -26,6 +26,7 @@ from app.services.jobs import job_manager
 from app.services.downloader import execute_download
 from app.services.cleaner import deferred_file_removal
 from app.services.downloads import release_urls
+from app.services.youtube_circuit import circuit as youtube_circuit
 from app.services.metadata import GuardrailError, get_cached_metadata, load_and_validate
 from app.services.network import (
     Identity,
@@ -71,23 +72,50 @@ async def api_capabilities():
     )
 
 
+def _youtube_blocked_detail() -> dict:
+    """The structured payload for a YouTube request the server declined to make.
+
+    Wording is deliberately "most links" rather than "unavailable": the circuit
+    allows the occasional working link through, so claiming impossibility would be
+    wrong and would cost the user their trust the first time they verify
+    elsewhere (§1.5 Decision #19).
+    """
+    return {
+        "code": "UPSTREAM_BLOCKED",
+        "message": (
+            "YouTube limits requests from shared servers, so most links won't work "
+            "here. The native app downloads from your own connection — no limits."
+        ),
+        "remedy": "native_app",
+        "retry_after_seconds": int(youtube_circuit.remaining()),
+    }
+
+
 @router.post("/info", response_model=InfoResponse)
 async def api_info(req: InfoRequest, request: Request):
     # Populate the metadata cache so /api/download can reuse this probe for
     # its guardrail checks instead of paying a second extraction.
+    guarded = youtube_circuit.allows_request(req.url)
+    if not guarded:
+        raise HTTPException(status_code=451, detail=_youtube_blocked_detail())
+
     try:
         response = await inspect_url(req.url)
     except UpstreamBotCheck as e:
+        youtube_circuit.record_failure()
         raise HTTPException(status_code=451, detail={
             "code": e.code,
             "message": str(e),
             "remedy": "native_app",
         })
     except ValueError as e:
+        youtube_circuit.release_probe()
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
+        youtube_circuit.release_probe()
         raise HTTPException(status_code=500, detail=f"Failed to inspect media URL: {str(e)}")
 
+    youtube_circuit.record_success()
     get_cached_metadata().put(req.url, response)
     return response
 
@@ -129,22 +157,34 @@ async def api_download(req: DownloadRequest, request: Request, response: Respons
         raise HTTPException(status_code=429, detail=gate.detail)
 
     # Guardrails run against server-side metadata, never client-supplied values.
+    # load_and_validate may probe YouTube for a URL whose metadata is not cached,
+    # so it goes through the same probe discipline as /api/info: this prevents a
+    # burst of concurrent downloads from stampeding an address YouTube already
+    # challenges (§1.5 Decision #17).
+    if not youtube_circuit.allows_request(req.url):
+        raise HTTPException(status_code=451, detail=_youtube_blocked_detail())
+
     try:
         await load_and_validate(req)
     except GuardrailError as e:
+        youtube_circuit.release_probe()
         raise HTTPException(status_code=e.status_code, detail=e.detail)
     except UpstreamBotCheck as e:
+        youtube_circuit.record_failure()
         raise HTTPException(status_code=451, detail={
             "code": e.code,
             "message": str(e),
             "remedy": "native_app",
         })
     except ValueError as e:
+        youtube_circuit.release_probe()
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
+        youtube_circuit.release_probe()
         raise HTTPException(status_code=500, detail=f"Failed to validate request: {str(e)}")
 
     job = job_manager.create_job(req)
+    youtube_circuit.record_success()
 
     try:
         queue_position, waiter = await scheduler.acquire(

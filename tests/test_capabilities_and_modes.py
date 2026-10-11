@@ -1001,6 +1001,128 @@ async def test_botcheck_returns_451_with_native_app_remedy(monkeypatch):
 def test_frontend_routes_451_to_the_upsell_not_the_error_screen():
     with open("static/js/app.js", "r", encoding="utf-8") as f:
         js = f.read()
-    assert "showUpstreamBlocked" in js
+    assert "showYouTubeUpsell" in js
     assert "resp.status === 451" in js
     assert "detailPayload" in js
+    # The superseded error-line handler must not linger as a second path.
+    assert "showUpstreamBlocked" not in js
+
+
+# --- YouTube circuit breaker (§1.5 Decision #17) --------------------------
+
+def test_circuit_recognises_youtube_urls_and_ignores_lookalikes():
+    from app.services.youtube_circuit import is_youtube_url
+
+    assert is_youtube_url("https://www.youtube.com/watch?v=abc")
+    assert is_youtube_url("https://youtu.be/abc")
+    assert is_youtube_url("https://m.youtube.com/shorts/abc")
+    assert is_youtube_url("https://music.youtube.com/watch?v=abc")
+    assert is_youtube_url("youtube.com/watch?v=abc")
+
+    # Lookalikes and other platforms must not trip the breaker.
+    assert not is_youtube_url("https://notyoutube.com/watch?v=abc")
+    assert not is_youtube_url("https://vimeo.com/123")
+    assert not is_youtube_url("")
+    assert not is_youtube_url("https://example.com/youtube.com")
+
+
+def test_circuit_blocks_youtube_only_and_opens_after_failure():
+    from app.services.youtube_circuit import YouTubeCircuit
+
+    c = YouTubeCircuit(cooldown_seconds=1800)
+    assert c.allows_request("https://vimeo.com/123") is True
+
+    # First YouTube probe is allowed through.
+    assert c.allows_request("https://youtube.com/watch?v=a") is True
+    # A concurrent request must not stampede the single allowed probe.
+    assert c.allows_request("https://youtube.com/watch?v=b") is False
+
+    c.record_failure()
+    assert c.is_open() is True
+    assert c.remaining() > 1790
+    # While open, no request reaches YouTube, regardless of traffic.
+    assert c.allows_request("https://youtube.com/watch?v=c") is False
+    # Other sites are unaffected by the breaker.
+    assert c.allows_request("https://vimeo.com/123") is True
+
+
+def test_circuit_closes_after_cooldown_and_allows_one_more_probe():
+    from app.services.youtube_circuit import YouTubeCircuit
+
+    c = YouTubeCircuit(cooldown_seconds=1800)
+    now = 1000.0
+    assert c.allows_request("https://youtube.com/watch?v=a", now=now) is True
+    c.record_failure(now=now)
+
+    # Still open just before expiry.
+    assert c.is_open(now=now + 1799) is True
+    # Closes exactly at expiry, releasing one probe.
+    assert c.is_open(now=now + 1800) is False
+    assert c.allows_request("https://youtube.com/watch?v=a", now=now + 1800) is True
+    assert c.allows_request("https://youtube.com/watch?v=b", now=now + 1800) is False
+
+
+def test_successful_probe_closes_the_circuit():
+    from app.services.youtube_circuit import YouTubeCircuit
+
+    c = YouTubeCircuit(cooldown_seconds=1800)
+    now = 1000.0
+    assert c.allows_request("https://youtube.com/watch?v=a", now=now) is True
+    c.record_failure(now=now)
+    assert c.is_open(now=now + 1) is True
+
+    # Once the window elapses a probe succeeds: the circuit stays closed.
+    assert c.allows_request("https://youtube.com/watch?v=a", now=now + 1800) is True
+    c.record_success(now=now + 1800)
+    assert c.is_open(now=now + 1801) is False
+    # Unblocked traffic flows normally, serially.
+    assert c.allows_request("https://youtube.com/watch?v=x", now=now + 1802) is True
+    c.record_success(now=now + 1802)
+    assert c.allows_request("https://youtube.com/watch?v=y", now=now + 1803) is True
+
+
+def test_release_probe_frees_the_slot_without_tripping():
+    from app.services.youtube_circuit import YouTubeCircuit
+
+    c = YouTubeCircuit(cooldown_seconds=1800)
+    assert c.allows_request("https://youtube.com/watch?v=a") is True
+    assert c.allows_request("https://youtube.com/watch?v=b") is False
+    # An internal error must not strand the slot or open the circuit.
+    c.release_probe()
+    assert c.is_open() is False
+    assert c.allows_request("https://youtube.com/watch?v=b") is True
+
+
+@pytest.mark.asyncio
+async def test_info_does_not_reach_youtube_while_the_circuit_is_open(monkeypatch):
+    """The whole point: no outbound request while the breaker is open."""
+    from app.api import routes as routes_mod
+    from app.services.youtube_circuit import circuit
+
+    calls = []
+
+    async def spy(url):
+        calls.append(url)
+        raise AssertionError("YouTube must not be contacted while the circuit is open")
+
+    monkeypatch.setattr(routes_mod, "inspect_url", spy)
+    monkeypatch.setattr(routes_mod.youtube_circuit, "is_open", lambda *a: True)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as client:
+        resp = await client.post("/api/info", json={"url": "https://youtube.com/watch?v=x"})
+
+    assert calls == []
+    assert resp.status_code == 451
+    detail = resp.json()["detail"]
+    assert detail["code"] == "UPSTREAM_BLOCKED"
+    assert detail["remedy"] == "native_app"
+    # Copy must stay truthful: "most links", not "unavailable" (Decision #19).
+    assert "most links" in detail["message"]
+    assert "unavailable" not in detail["message"].lower()
+
+
+def test_default_cooldown_is_thirty_minutes():
+    from app import config
+
+    assert config.YOUTUBE_COOLDOWN_SECONDS == 1800

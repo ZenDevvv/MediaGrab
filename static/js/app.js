@@ -512,7 +512,7 @@
       });
 
       if (resp.status === 451) {
-        showUpstreamBlocked(detailPayload(await resp.json().catch(() => ({}))));
+        showYouTubeUpsell(detailPayload(await resp.json().catch(() => ({}))));
         return;
       }
       if (!resp.ok) {
@@ -522,6 +522,8 @@
       }
 
       const data = await resp.json();
+      hideYouTubeUpsell();
+      if (errEl) errEl.hidden = true;
       AppState.metadata = data;
       AppState.currentUrl = url;
 
@@ -1023,7 +1025,7 @@
           return;
         }
         if (resp.status === 451) {
-          showUpstreamBlocked(detailPayload(err));
+          showYouTubeUpsell(detailPayload(err));
           return;
         }
         throw new Error(detailPayload(err).message || 'Download request rejected.');
@@ -1474,57 +1476,64 @@
     }
   }
 
-  // Upstream refused this server's address (YouTube bot check). Retrying or
-    // changing options cannot help, so route to the native-app upsell instead
-    // of a dead-end error.
-    function showUpstreamBlocked(payload) {
+    // YouTube upsell card (§1.5 Decision #18).
+    // Distinct from showError: the link is valid and the server is fine, so it
+    // gets guidance copy and an app CTA rather than a red error line.
+    function showYouTubeUpsell(payload) {
       if (AppState.eventSource) AppState.eventSource.close();
       if (AppState.pollTimer) clearInterval(AppState.pollTimer);
 
-      const msg = (payload && payload.message) ||
-        'This site is blocking requests from our server. The native app downloads from your own connection.';
+      const message = (payload && payload.message) || '';
 
-      // The user may be on the landing screen, which has no #view-choose.
-      // Switching screens there would blank the page, so surface the message
-      // inline and only navigate when a configure screen actually exists.
-      const hasChoose = !!$('#view-choose');
-      if (hasChoose) showScreen('choose');
+      // The landing screen has no #view-choose; switching screens there blanks
+      // the page, so only navigate when a configure screen actually exists.
+      if ($('#view-choose')) showScreen('choose');
 
-      // Inline message on the landing screen.
+      // The card carries the full reason. Repeating the same sentence in the
+      // red inline error line underneath just restates it in a worse style, so
+      // clear any stale error and let the card speak for itself.
       const inline = $('#inspect-error');
-      if (inline) {
-        inline.textContent = msg;
-        inline.hidden = false;
+      if (inline) { inline.hidden = true; inline.textContent = ''; }
+
+      const card = $('#yt-upsell');
+      if (!card) return;
+      card.hidden = false;
+
+      if (message) {
+        const text = $('#yt-upsell-text');
+        if (text) text.textContent = message;
       }
 
-      const banner = $('#trim-limit-banner');
-      const text = $('#trim-limit-text');
-      if (banner && text) {
-        text.textContent = msg;
-        banner.hidden = false;
-        banner.classList.remove('over');
+      // Prefer a real binary; fall back to the page so the CTA always works.
+      const downloads = (AppState.capabilities && AppState.capabilities.downloads) || {};
+      const target = PLATFORM_TARGETS.find((t) => t.key === detectPlatform()) || PLATFORM_TARGETS[0];
+      const cta = $('#yt-upsell-cta');
+      const ctaLabel = $('#yt-upsell-cta-label');
+      if (cta) {
+        const url = downloads[target.id];
+        cta.href = isRealDownload(url) ? url : '/downloads';
+        cta.removeAttribute('aria-disabled');
+        cta.hidden = false;
+      }
+      if (ctaLabel) {
+        const copy = {
+          windows: 'Get the Windows app',
+          linux: 'Get the Linux app',
+          android: 'Get the Android app'
+        }[target.key] || 'Get the app';
+        ctaLabel.textContent = copy;
       }
 
-      const hint = $('#error-upgrade-hint');
-      if (hint) {
-        const hintText = $('#error-upgrade-text');
-        if (hintText) hintText.textContent = msg;
-        hint.hidden = false;
-        const cta = $('#error-upgrade-cta');
-        if (cta) {
-          const downloads = (AppState.capabilities && AppState.capabilities.downloads) || {};
-          const target = PLATFORM_TARGETS.find((t) => t.key === detectPlatform()) || PLATFORM_TARGETS[0];
-          const url = downloads[target.id];
-          if (isRealDownload(url)) {
-            cta.href = url;
-            cta.removeAttribute('aria-disabled');
-            cta.hidden = false;
-          } else {
-            cta.href = '/downloads';
-            cta.hidden = false;
-          }
-        }
+      const dismiss = $('#yt-upsell-dismiss');
+      if (dismiss && !dismiss.dataset.wired) {
+        dismiss.dataset.wired = '1';
+        dismiss.addEventListener('click', () => { card.hidden = true; }, { once: true });
       }
+    }
+
+    function hideYouTubeUpsell() {
+      const card = $('#yt-upsell');
+      if (card) card.hidden = true;
     }
 
     // Read the structured detail the API returns, tolerating a plain string.

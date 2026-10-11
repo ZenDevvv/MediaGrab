@@ -91,6 +91,18 @@ M3's "save directly to `~/Downloads`" requirement collides with retention code t
 
 **Credentials.** `FREESTYLE_API_KEY` is not present on the development host; the maintainer supplies it. No credential is ever committed to the repository.
 
+### 1.5 YouTube Posture on the Hosted Instance
+
+Measured on the hosted VM (egress `AS36320 Freestyle Cloud`): YouTube refuses anonymous requests for most videos. Every code-level lever was tried and measured — 11 player clients (identical failures), the Deno JS runtime (no change), TLS impersonation (**0/4, worse than default**), yt-dlp nightly vs stable (1/10 either way), and forced IPv6 egress (no change). A control run from a residential IP succeeded on the same URLs, confirming the cause is address reputation, not configuration.
+
+A cross-platform control test also established that **only YouTube is affected** — SoundCloud, TikTok, Dailymotion, Streamable, TED, Facebook and Vimeo all extract normally from the VM.
+
+**Decision #17 — circuit breaker, not pre-emptive blocking.** A pre-emptive host check would deny the ~1 in 10 videos that currently work, but leaving it fully reactive means *every visitor attempt* becomes another failed YouTube request, which can escalate the address from challenge to hard block. The hosted server therefore probes YouTube **once**, and on the first bot check opens a circuit for 30 minutes (`MEDIA_GRAB_YOUTUBE_COOLDOWN_SECONDS`, default 1800) during which no request reaches YouTube and all callers receive the upsell. Exposure is bounded to roughly one request per window regardless of traffic.
+
+**Decision #18 — the notice is an upsell card, not an error.** The existing `.err-line` treatment reads as failure. The new card reuses the design system's `.limit-banner` vocabulary (accent-soft, 1.5px edge border, 12px radius) with the reason, an app CTA, and a quiet line confirming other sites work. Placement: inline on the landing screen, and on the configure screen when a download is attempted there.
+
+**Decision #19 — copy stays truthful.** The notice says *"most links won't work here"*, not *"unavailable"*. Under the circuit breaker some links genuinely do work, and overclaiming is the fastest way to lose a user's trust when they verify elsewhere.
+
 ---
 
 ## 2. Ecosystem Architecture
