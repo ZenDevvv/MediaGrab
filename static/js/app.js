@@ -1481,10 +1481,21 @@
       if (AppState.eventSource) AppState.eventSource.close();
       if (AppState.pollTimer) clearInterval(AppState.pollTimer);
 
-      showScreen('choose');
-
       const msg = (payload && payload.message) ||
         'This site is blocking requests from our server. The native app downloads from your own connection.';
+
+      // The user may be on the landing screen, which has no #view-choose.
+      // Switching screens there would blank the page, so surface the message
+      // inline and only navigate when a configure screen actually exists.
+      const hasChoose = !!$('#view-choose');
+      if (hasChoose) showScreen('choose');
+
+      // Inline message on the landing screen.
+      const inline = $('#inspect-error');
+      if (inline) {
+        inline.textContent = msg;
+        inline.hidden = false;
+      }
 
       const banner = $('#trim-limit-banner');
       const text = $('#trim-limit-text');
