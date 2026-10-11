@@ -1028,14 +1028,19 @@
           showYouTubeUpsell(detailPayload(err));
           return;
         }
-        throw new Error(detailPayload(err).message || 'Download request rejected.');
+        // Carry the server's structured code onto the Error so the diagnosis
+        // panel can show something true instead of a generic placeholder.
+        const detail = detailPayload(err);
+        const rejected = new Error(detail.message || 'Download request rejected.');
+        rejected.code = detail.code || '';
+        throw rejected;
       }
 
       const data = await resp.json();
       AppState.activeJobId = data.job_id;
       connectSSE(data.job_id);
     } catch (err) {
-      showError(err.message);
+      showError(err.message, err.code);
     }
   }
 
@@ -1544,13 +1549,23 @@
       return { message: typeof body === 'string' ? body : '' };
     }
 
-    function showError(msg) {
+    function showError(msg, code) {
     if (AppState.eventSource) AppState.eventSource.close();
     if (AppState.pollTimer) clearInterval(AppState.pollTimer);
     const descEl = $('#error-desc-msg');
     if (descEl) descEl.textContent = msg || 'Could not process media stream.';
+    // Diagnosis code is opt-in: a placeholder here previously read as
+    // "MEDIA_INACCESSIBLE" for every failure, telling users their video was
+    // private when the real cause was a server-side error. Absent a real code,
+    // show no code at all rather than a wrong one.
+    const codeEl = $('#error-diag-code');
+    if (codeEl) {
+      const value = (code || '').trim();
+      codeEl.textContent = value;
+      codeEl.hidden = !value;
+    }
     const diagEl = $('#error-diag-detail') || $('#error-details-text');
-    if (diagEl) diagEl.textContent = `Details: ${msg || 'Unknown error'}`;
+    if (diagEl) diagEl.textContent = msg ? `Details: ${msg}` : 'No further detail was reported.';
     const retryInp = $('#error-url-retry');
     if (retryInp) retryInp.value = AppState.currentUrl || '';
     showScreen('error');

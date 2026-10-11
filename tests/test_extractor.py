@@ -97,3 +97,102 @@ def test_sync_extract_info_opts(monkeypatch):
     clients = captured_opts["extractor_args"]["youtube"]["player_client"]
     assert "web" not in clients and "mweb" not in clients
     assert "default" in clients
+
+
+# --- Non-numeric format fields (§ user report: Facebook parse crash) --------
+
+def _fmt(**kw):
+    base = {'height': 1080, 'vcodec': 'avc1.640028', 'ext': 'mp4', 'acodec': 'none',
+            'filesize': 10_000_000, 'tbr': 2000}
+    base.update(kw)
+    return base
+
+
+def test_parse_metadata_survives_string_format_fields():
+    """yt-dlp can emit numeric strings for height/filesize on some extractors.
+
+    Comparing those against ints raised "'>' not supported between instances of
+    'int' and 'str'", which surfaced to the user as an opaque processing
+    failure rather than a usable diagnosis.
+    """
+    from app.services.extractor import parse_metadata
+
+    info = {
+        'title': 'Clip',
+        'duration': 120,
+        'formats': [
+            _fmt(height='1080', filesize='90000000'),
+            _fmt(height='720', filesize='40000000'),
+            _fmt(height='480', filesize='12000000'),
+        ],
+    }
+    meta = parse_metadata(info, "https://example.com/v")
+    assert meta.title == "Clip"
+    resolutions = [q.resolution for q in meta.qualities]
+    assert "1080p" in resolutions and "720p" in resolutions
+    # Values are coerced to real numbers, not left as strings.
+    for q in meta.qualities:
+        assert isinstance(q.approx_bytes, int)
+
+
+def test_parse_metadata_prefers_the_larger_string_filesize():
+    """The exact comparison that crashed: int filesize > stored string size."""
+    from app.services.extractor import parse_metadata
+
+    info = {
+        'title': 'Clip',
+        'duration': 120,
+        'formats': [
+            _fmt(height=1080, filesize='90000000'),
+            _fmt(height=1080, filesize=95000000),
+        ],
+    }
+    meta = parse_metadata(info, "https://example.com/v")
+    top = next(q for q in meta.qualities if q.resolution == "1080p")
+    assert top.approx_bytes == 95000000
+
+
+def test_parse_metadata_skips_junk_numeric_fields_without_raising():
+    from app.services.extractor import parse_metadata
+
+    info = {
+        'title': 'Clip',
+        'duration': 120,
+        'formats': [
+            _fmt(height='not-a-number', filesize='also-bad'),
+            _fmt(height=None, filesize=None),
+            _fmt(height='1080', filesize='90000000'),
+        ],
+    }
+    meta = parse_metadata(info, "https://example.com/v")
+    assert meta.qualities, "must still offer at least one quality"
+
+
+def test_parse_metadata_handles_string_tbr_without_estimate_crash():
+    from app.services.extractor import parse_metadata
+
+    info = {
+        'title': 'Clip',
+        'duration': 120,
+        'formats': [
+            _fmt(height='1080', filesize=None, tbr='2500.5', abr=None),
+        ],
+    }
+    meta = parse_metadata(info, "https://example.com/v")
+    top = next(q for q in meta.qualities if q.resolution == "1080p")
+    assert top.approx_bytes > 0
+
+
+def test_error_diagnosis_shows_no_placeholder_code():
+    """A hardcoded code mislabelled every failure as MEDIA_INACCESSIBLE."""
+    with open("static/choose.html", "r", encoding="utf-8") as f:
+        html = f.read()
+    assert "MEDIA_INACCESSIBLE" not in html
+    assert 'id="error-diag-code" hidden' in html
+
+    with open("static/js/app.js", "r", encoding="utf-8") as f:
+        js = f.read()
+    assert "function showError(msg, code)" in js
+    # Code is opt-in and populated from the server, never a fixed string.
+    assert "codeEl.textContent = value" in js
+    assert "codeEl.hidden = !value" in js

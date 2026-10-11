@@ -26,6 +26,26 @@ def _sync_extract_info(url: str) -> Dict[str, Any]:
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         return ydl.extract_info(url, download=False)
 
+def _to_number(value: Any, default: float = 0.0) -> float:
+    """Coerce a yt-dlp format field to a number.
+
+    yt-dlp's format dicts are not uniformly typed: most extractors emit ints and
+    floats, but several (Facebook and Instagram among them) can yield numeric
+    strings for ``height``/``filesize``. Comparing those against ints raises
+    ``'>' not supported between instances of 'int' and 'str'`` deep inside
+    parsing, which surfaces to the user as an opaque processing failure rather
+    than a diagnosis they can act on.
+    """
+    if value is None or isinstance(value, bool):
+        return default
+    if isinstance(value, (int, float)):
+        return value
+    try:
+        return float(str(value).strip())
+    except (TypeError, ValueError):
+        return default
+
+
 def parse_metadata(info: Dict[str, Any], url: str) -> InfoResponse:
     title = info.get('title') or 'Untitled'
     uploader = info.get('uploader') or info.get('channel') or 'Unknown'
@@ -53,7 +73,7 @@ def parse_metadata(info: Dict[str, Any], url: str) -> InfoResponse:
     # Build quality map for video
     res_map: Dict[int, Dict[str, Any]] = {}
     for f in formats:
-        height = f.get('height')
+        height = int(_to_number(f.get('height'), 0))
         if not height or height < 240:
             continue
 
@@ -65,8 +85,8 @@ def parse_metadata(info: Dict[str, Any], url: str) -> InfoResponse:
 
         vcodec = (f.get('vcodec') or '').lower()
         ext = (f.get('ext') or '').lower()
-        filesize = f.get('filesize') or f.get('filesize_approx')
-        tbr = f.get('tbr') or (f.get('vbr', 0) + (f.get('abr', 0) or 128))
+        filesize = int(_to_number(f.get('filesize') or f.get('filesize_approx'), 0))
+        tbr = _to_number(f.get('tbr'), 0) or (_to_number(f.get('vbr'), 0) + (_to_number(f.get('abr'), 0) or 128))
 
         if not filesize and tbr and duration:
             filesize = int(tbr * 1000 / 8 * duration)
