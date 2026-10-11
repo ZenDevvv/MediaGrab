@@ -252,7 +252,11 @@ def create_ydl_opts(
     # coarse net rather than a precise cap -- the pre-flight estimate in
     # metadata.validate_request is what actually rejects oversized requests.
     if config.IS_HOSTED:
-        opts['max_filesize'] = config.HOSTED_MAX_FILESIZE_ARG
+        # Must be a byte count. yt-dlp compares format sizes against this value
+        # directly, so the human-readable "1024m" form raises
+        # "'>' not supported between instances of 'int' and 'str'" and kills the
+        # download. HOSTED_MAX_FILESIZE_ARG is documentation-only.
+        opts['max_filesize'] = config.HOSTED_MAX_FILE_SIZE_BYTES
 
     if progress_port:
         opts['external_downloader_args'] = {

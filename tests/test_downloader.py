@@ -133,3 +133,39 @@ def test_handle_ffmpeg_progress_trim():
     assert final_updated.progress == 99.0
     assert final_updated.stage == "Finalizing container..."
 
+
+
+# --- max_filesize typing (user report: every hosted download failed) --------
+
+def test_hosted_max_filesize_is_a_byte_count_not_a_string(monkeypatch):
+    """yt-dlp compares format sizes against max_filesize numerically.
+
+    Passing the human-readable "1024m" made it evaluate `filesize > "1024m"`
+    and raise "'>' not supported between instances of 'int' and 'str'", which
+    surfaced as "Processing failed" on every hosted download.
+    """
+    from app.services.downloader import create_ydl_opts
+    from app.api.schemas import DownloadRequest
+
+    monkeypatch.setattr("app.services.downloader.config.IS_HOSTED", True)
+
+    req = DownloadRequest(url="https://example.com/v", quality="1080p", mode="mp4")
+    opts = create_ydl_opts("job1", req)
+
+    assert "max_filesize" in opts
+    assert isinstance(opts["max_filesize"], int)
+    assert not isinstance(opts["max_filesize"], bool)
+    assert opts["max_filesize"] > 0
+
+
+def test_hosted_max_filesize_omitted_in_desktop_mode(monkeypatch):
+    from app.services.downloader import create_ydl_opts
+    from app.api.schemas import DownloadRequest
+
+    monkeypatch.setattr("app.services.downloader.config.IS_HOSTED", False)
+
+    req = DownloadRequest(url="https://example.com/v", quality="2160p", mode="mp4")
+    opts = create_ydl_opts("job2", req)
+
+    # The native app is unlimited by design and must not carry the cap.
+    assert "max_filesize" not in opts

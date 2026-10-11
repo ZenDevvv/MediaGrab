@@ -87,6 +87,12 @@ HOSTED_MAX_DURATION_SECONDS = int(os.getenv("HOSTED_MAX_DURATION_SECONDS", "3600
 HOSTED_MAX_FILE_SIZE_BYTES = int(os.getenv(
     "HOSTED_MAX_FILE_SIZE_BYTES", str(1 * 1024 * 1024 * 1024)
 ))
+
+# yt-dlp's `max_filesize` is a byte count, not a human-readable size. Passing
+# the string "1024m" made yt-dlp compare an int filesize against a str and
+# raise "'>' not supported between instances of 'int' and 'str'", which aborted
+# every hosted download as "Processing failed". Keep the human-readable form
+# for documentation and shell-facing use only; the downloader gets the int.
 HOSTED_MAX_FILESIZE_ARG = os.getenv("HOSTED_MAX_FILESIZE_ARG", "1024m")
 
 # Resolutions locked to the native apps in hosted mode.
