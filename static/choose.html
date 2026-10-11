@@ -18,6 +18,7 @@
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Gabarito:wght@500;600;700;800&family=Onest:wght@400;500;600&display=swap">
 
   <link rel="stylesheet" href="/css/app.css">
+  <!--mg-mode-->
 </head>
 <body>
 
@@ -99,6 +100,9 @@
             <div class="sec-title">Trim</div>
             <div class="wavebox">
               <div class="wave tall">
+                <div class="limit-banner" id="trim-limit-banner" hidden>
+                  <span id="trim-limit-text"></span>
+                </div>
                 <div class="bars" id="trim-bars-container" aria-hidden="true"></div>
                 <input class="rng" id="trim-s" type="range" min="0" max="100" step="1" value="0" aria-label="Start time">
                 <input class="rng" id="trim-e" type="range" min="0" max="100" step="1" value="100" aria-label="End time">
@@ -306,9 +310,12 @@
             <dt>Length</dt><dd id="ready-spec-clip">0:00</dd>
             <dt>Captions</dt><dd id="ready-spec-captions">None</dd>
           </dl>
-          <p class="timer">
+          <!-- Ephemeral notice. The countdown intentionally starts only when the
+               user saves, matching the server-side purge-on-retrieval behaviour
+               (§1.2 Decision #8). Desktop mode shows a no-timer confirmation. -->
+          <p class="save-notice" id="ready-retention-notice" hidden>
             <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7.5V12l3 2"/></svg>
-            <span>Deleted from this machine in <b id="ready-deletion-timer">29:59</b></span>
+            <span id="ready-retention-text"></span>
           </p>
         </aside>
       </div>
@@ -322,6 +329,13 @@
           <div>
             <h2 style="font-size: 32px;">That link didn't work.</h2>
             <p style="color: var(--muted);" id="error-desc-msg">There's no media stream accessible at this address.</p>
+          </div>
+        </div>
+
+        <div class="upgrade-hint" id="error-upgrade-hint" hidden>
+          <div id="error-upgrade-text"></div>
+          <div class="r" style="display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap;">
+            <a class="btn btn-primary btn-sm" id="error-upgrade-cta" href="#" download>Get the native app</a>
           </div>
         </div>
 

@@ -264,6 +264,94 @@ svg .t-hill-f { fill: var(--ink); fill-opacity: 0.12; }
 .strip .appicon, .install-strip .appicon { --s: 28px; }
 .strip .r, .install-strip .r { display: flex; gap: 6px; }
 
+/* Hosted Promo Strip */
+.promo-strip { position: relative; flex-wrap: wrap; }
+.promo-strip .btn-primary { text-decoration: none; }
+.promo-panel {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+  width: 100%;
+  padding-top: 10px;
+  margin-top: 4px;
+  border-top: 1.5px dashed var(--line);
+}
+.promo-panel[hidden] { display: none; }
+.promo-item {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 12px;
+  border: 1.5px solid var(--line);
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+}
+.promo-item:hover { border-color: var(--edge); }
+.promo-item[aria-disabled="true"] {
+  opacity: 0.5;
+  pointer-events: none;
+}
+.promo-note { font-size: 12.5px; color: var(--muted); }
+
+/* Locked quality chip (hosted mode, §1.2 Decision #10) */
+.chip.locked {
+  opacity: 0.55;
+  cursor: not-allowed;
+  filter: grayscale(0.4);
+}
+.chip.locked .tag.locked-tag {
+  background: var(--accent-soft);
+  color: var(--accent-ink);
+  border-color: var(--edge);
+}
+.chip.locked .tag.locked-tag::before { content: "🔒 "; }
+
+/* Trim limit banner (hosted clip-aware guard) */
+.limit-banner {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border: 1.5px solid var(--edge);
+  border-radius: 12px;
+  background: var(--accent-soft);
+  color: var(--ink);
+  font-size: 13.5px;
+  line-height: 1.45;
+}
+.limit-banner[hidden] { display: none; }
+.limit-banner.over { background: var(--soft); border-color: var(--bad); }
+.limit-banner b { font-weight: 700; }
+
+/* Ephemeral save notice (hosted) */
+.save-notice {
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  padding: 10px 12px;
+  border: 1.5px solid var(--edge);
+  border-radius: 12px;
+  background: var(--accent-soft);
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.save-notice[hidden] { display: none; }
+
+/* Rate-limited upgrade prompt */
+.upgrade-hint {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1.5px solid var(--edge);
+  border-radius: 12px;
+  background: var(--accent-soft);
+  font-size: 13px;
+}
+
 /* Main App Container */
 .main-wrap {
   flex: 1;

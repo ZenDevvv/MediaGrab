@@ -29,8 +29,111 @@
     activeJobId: null,
     eventSource: null,
     pollTimer: null,
-    deletionTimer: null
+    deletionTimer: null,
+    capabilities: null,
+    capabilitiesLoaded: false
   };
+
+  // --- Capabilities (§1.2 Decision #9) ---
+  // Mode is read from the server-rendered meta tag and is authoritative: it
+  // cannot race, and it survives a capabilities endpoint that 404s against a
+  // stale backend. /api/capabilities supplies only numeric limits and download
+  // URLs. If that fetch fails we fall back to HOSTED_SAFE_DEFAULTS rather than
+  // blocking the UI -- desktop applies no server-side guardrails, so assuming
+  // "unlimited" here would misadvertise capability, while assuming hosted merely
+  // mislabels it.
+  const HOSTED_SAFE_DEFAULTS = Object.freeze({
+    mode: 'hosted',
+    limits: {
+      max_resolution: '1080p',
+      max_duration_seconds: 3600,
+      max_file_size_bytes: 1073741824,
+      locked_resolutions: ['1440p', '2160p']
+    },
+    downloads: { windows_url: null, linux_url: null, android_url: null }
+  });
+
+  function readMeta(name, fallback) {
+    const el = document.querySelector(`meta[name="${name}"]`);
+    return el ? el.getAttribute('content') : fallback;
+  }
+
+  function readMetaInt(name, fallback) {
+    const raw = readMeta(name, null);
+    const parsed = raw === null ? NaN : parseInt(raw, 10);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
+
+  // Mode resolution must be synchronous -- it is needed before the first render.
+  function resolveMode() {
+    const raw = readMeta('mg-mode', null);
+    return raw === 'hosted' ? 'hosted' : 'desktop';
+  }
+
+  AppState.mode_ = resolveMode();
+  AppState.retentionSeconds = readMetaInt('mg-retention-seconds', 1800);
+
+  function isHostedMode() {
+    return AppState.mode_ === 'hosted';
+  }
+
+  function lockedResolutions() {
+    const fromApi = AppState.capabilities
+      && AppState.capabilities.limits
+      && AppState.capabilities.limits.locked_resolutions;
+    const list = Array.isArray(fromApi) && fromApi.length
+      ? fromApi
+      : HOSTED_SAFE_DEFAULTS.limits.locked_resolutions;
+    return new Set(list);
+  }
+
+  function maxDurationSeconds() {
+    const fromApi = AppState.capabilities
+      && AppState.capabilities.limits
+      && AppState.capabilities.limits.max_duration_seconds;
+    return Number.isFinite(fromApi) ? fromApi : HOSTED_SAFE_DEFAULTS.limits.max_duration_seconds;
+  }
+
+  function maxFileSizeBytes() {
+    const fromApi = AppState.capabilities
+      && AppState.capabilities.limits
+      && AppState.capabilities.limits.max_file_size_bytes;
+    return Number.isFinite(fromApi) ? fromApi : HOSTED_SAFE_DEFAULTS.limits.max_file_size_bytes;
+  }
+
+  async function loadCapabilities() {
+    try {
+      const resp = await fetch(`${API_BASE}/capabilities`);
+      if (!resp.ok) throw new Error(`capabilities ${resp.status}`);
+      const data = await resp.json();
+      // The server tag stays authoritative for mode; a mismatched payload is
+      // ignored rather than allowed to flip the page's gating.
+      AppState.capabilities = {
+        ...data,
+        mode: AppState.mode_,
+        limits: { ...HOSTED_SAFE_DEFAULTS.limits, ...(data.limits || {}) },
+        downloads: data.downloads || {}
+      };
+      if (Number.isFinite(data.retention_seconds)) {
+        AppState.retentionSeconds = data.retention_seconds;
+      }
+    } catch (e) {
+      // Hosted-safe defaults. Never block the page on this.
+      AppState.capabilities = {
+        ...HOSTED_SAFE_DEFAULTS,
+        mode: AppState.mode_,
+        limits: {
+          ...HOSTED_SAFE_DEFAULTS.limits,
+          ...(AppState.capabilities ? AppState.capabilities.limits : {})
+        },
+        downloads: (AppState.capabilities && AppState.capabilities.downloads) || {}
+      };
+      console.warn('MediaGrab: capabilities unavailable, using conservative defaults.', e);
+    } finally {
+      AppState.capabilitiesLoaded = true;
+    }
+    return AppState.capabilities;
+  }
 
   // --- DOM Elements ---
   const $ = (selector) => document.querySelector(selector);
@@ -250,6 +353,8 @@
     const { total, start, end } = AppState.trim;
     const duration = Math.max(0, end - start);
     const isWhole = start === 0 && end === total;
+    // Keep the clip-aware hosted limit in sync with the trim handles.
+    updateTrimLimitBanner();
 
     // Sliders
     const rs = $('#trim-s');
@@ -374,6 +479,19 @@
     if (btnLabel) btnLabel.textContent = label;
     const specEl = $('#config-summary-spec');
     if (specEl) specEl.textContent = spec;
+
+    // Block the grab when the clip is definitively over the hosted limit, so the
+    // user gets guidance instead of a server rejection. SRT is exempt.
+    const startBtn = $('#btn-start-download');
+    if (startBtn) {
+      const overLimit = isHostedMode()
+        && AppState.mode !== 'srt'
+        && currentClipDuration() > maxDurationSeconds();
+      startBtn.disabled = overLimit;
+      startBtn.title = overLimit
+        ? 'Trim the clip to fit the hosted limit, or use the native app.'
+        : '';
+    }
   }
 
   // --- API Client: Metadata Inspection ---
@@ -493,6 +611,7 @@
     ];
 
     qualities.forEach((q, idx) => {
+      const locked = isResolutionLocked(q.resolution);
       const chip = document.createElement('div');
       chip.className = `chip ${idx === 0 ? 'selected' : ''}`;
       chip.dataset.resolution = q.resolution;
@@ -501,8 +620,15 @@
         <b>${q.resolution}</b>
         <i>${formatBytes(q.approx_bytes)}</i>
         <span class="tag ${q.type === 'remux' ? 'fast' : 'slow'}">${q.type}</span>
+        ${locked ? '<span class="tag locked-tag">Desktop/Android only</span>' : ''}
       `;
+      if (locked) {
+        chip.classList.add('locked');
+        chip.setAttribute('aria-disabled', 'true');
+        chip.setAttribute('title', 'Available in the Desktop or Android app');
+      }
       chip.addEventListener('click', () => {
+        if (isResolutionLocked(q.resolution)) return;
         $$('#video-qualities-grid .chip').forEach((c) => c.classList.remove('selected'));
         chip.classList.add('selected');
         AppState.selectedQuality = q.resolution;
@@ -510,7 +636,17 @@
       });
       qualitiesGrid.appendChild(chip);
     });
-    AppState.selectedQuality = qualities[0].resolution;
+
+    // Never default to a locked resolution: a stale preference (or a source whose
+    // top quality is hosted-locked) must not silently produce a rejected grab.
+    AppState.selectedQuality = isResolutionLocked(qualities[0].resolution)
+      ? (highestAllowedResolution(qualities) || qualities[0].resolution)
+      : qualities[0].resolution;
+    $$('#video-qualities-grid .chip').forEach((c) => {
+      c.classList.toggle('selected', c.dataset.resolution === AppState.selectedQuality);
+    });
+    applyQualityGating(qualities);
+    updateTrimLimitBanner();
 
     // Populate Subtitles
     const subsTrackRow = $('#row-subs-track');
@@ -598,6 +734,212 @@
     if (cfgCaptions) cfgCaptions.textContent = `Captions: ${txt}`;
   }
 
+  // --- Promo Strip & Smart Device Detection (§1.2 Decision #3) ---
+  const PLATFORM_TARGETS = [
+    { id: 'windows_url', key: 'windows', label: 'Windows', cta: 'Download Windows App (.exe)' },
+    { id: 'linux_url', key: 'linux', label: 'Linux', cta: 'Download Linux App' },
+    { id: 'android_url', key: 'android', label: 'Android', cta: 'Download Android App (.apk)' }
+  ];
+
+  function detectPlatform() {
+    const ua = navigator.userAgent || '';
+    const touch = navigator.maxTouchPoints || 0;
+    // Order matters: Android UA also contains "Linux" and iPad UA can claim
+    // "Macintosh", so the more specific patterns are tested first.
+    if (/Android/i.test(ua)) return 'android';
+    if (/iPhone|iPad|iPod/i.test(ua)) return 'ios';
+    if (/Windows/i.test(ua)) return 'windows';
+    if (/Macintosh|Mac OS X/i.test(ua)) return 'ios';
+    if (/CrOS/i.test(ua)) return 'linux';
+    if (/Linux|X11/i.test(ua)) return 'linux';
+    // Touch-only without a recognizable desktop UA is most likely a tablet.
+    if (touch > 1 && !/Windows|Macintosh/i.test(ua)) return 'android';
+    return 'linux';
+  }
+
+  function applyDownloadTargets() {
+    const downloads = (AppState.capabilities && AppState.capabilities.downloads) || {};
+    PLATFORM_TARGETS.forEach((t) => {
+      const el = $(`#hosted-promo-${t.key}`);
+      if (!el) return;
+      const url = downloads[t.id];
+      if (url) {
+        el.href = url;
+        el.removeAttribute('aria-disabled');
+      } else {
+        // No URL available (capabilities unavailable): keep the control
+        // visible but inert rather than linking somewhere unknown.
+        el.href = '#';
+        el.setAttribute('aria-disabled', 'true');
+      }
+    });
+
+    const cta = $('#hosted-promo-cta');
+    if (cta) {
+      const target = PLATFORM_TARGETS.find((t) => t.key === detectPlatform()) || PLATFORM_TARGETS[0];
+      const url = downloads[target.id];
+      cta.textContent = target.cta;
+      if (url) {
+        cta.href = url;
+        cta.removeAttribute('aria-disabled');
+      } else {
+        cta.href = '#';
+        cta.setAttribute('aria-disabled', 'true');
+      }
+    }
+  }
+
+  function initPromoStrip() {
+    const strip = $('#hosted-promo-strip');
+    if (!strip) return;
+
+    // Only meaningful where limits actually apply.
+    if (!isHostedMode()) {
+      strip.hidden = true;
+      return;
+    }
+
+    strip.hidden = false;
+
+    const platform = detectPlatform();
+    const text = $('#hosted-promo-text');
+    if (text) {
+      if (platform === 'ios') {
+        text.textContent = 'iPhone and iPad: downloads are capped here. The native app unlocks 4K and unlimited size.';
+      } else if (platform === 'android') {
+        text.textContent = 'Download directly on your phone with the Android app — no limits.';
+      } else {
+        text.textContent = 'Get 4K, unlimited size, and no time limit with the native app.';
+      }
+    }
+
+    // iOS has no native client; don't advertise a desktop download as primary.
+    const cta = $('#hosted-promo-cta');
+    if (cta && platform === 'ios') {
+      cta.hidden = true;
+    }
+
+    applyDownloadTargets();
+
+    const toggle = $('#hosted-promo-other');
+    const panel = $('#hosted-promo-panel');
+    // Guard against duplicate listeners: initPromoStrip runs again after
+    // capabilities resolve.
+    if (toggle && panel && !toggle.dataset.wired) {
+      toggle.dataset.wired = '1';
+      toggle.addEventListener('click', () => {
+        const willOpen = panel.hidden;
+        panel.hidden = !willOpen;
+        toggle.setAttribute('aria-expanded', String(willOpen));
+        toggle.textContent = willOpen ? 'Hide Platforms' : 'Other Platforms';
+      });
+    }
+  }
+
+  // --- Quality Gating (§1.2 Decision #10) ---
+  function isResolutionLocked(resolution) {
+    if (!isHostedMode()) return false;
+    return lockedResolutions().has(resolution);
+  }
+
+  function highestAllowedResolution(qualities) {
+    const allowed = qualities
+      .map((q) => q.resolution)
+      .filter((r) => !isResolutionLocked(r));
+    if (allowed.length) {
+      // Qualities arrive highest-first, so the first allowed entry is the cap.
+      return allowed[0];
+    }
+    return null;
+  }
+
+  function applyQualityGating(qualities) {
+    const grid = $('#video-qualities-grid');
+    if (!grid) return;
+
+    const locked = lockedResolutions();
+    const chips = grid.querySelectorAll('.chip');
+
+    chips.forEach((chip) => {
+      const res = chip.dataset.resolution;
+      const isLocked = isHostedMode() && locked.has(res);
+
+      chip.classList.toggle('locked', isLocked);
+      chip.setAttribute('aria-disabled', String(isLocked));
+      if (isLocked) chip.setAttribute('title', 'Available in the Desktop or Android app');
+
+      let tag = chip.querySelector('.locked-tag');
+      if (isLocked && !tag) {
+        tag = document.createElement('span');
+        tag.className = 'tag locked-tag';
+        tag.textContent = 'Desktop/Android only';
+        chip.appendChild(tag);
+      } else if (!isLocked && tag) {
+        tag.remove();
+      }
+    });
+
+    // Auto-correct a selection that is no longer permitted, so the user never
+    // submits a request the server will reject.
+    if (isResolutionLocked(AppState.selectedQuality)) {
+      const fallback = highestAllowedResolution(qualities);
+      if (fallback) {
+        AppState.selectedQuality = fallback;
+        chips.forEach((c) => c.classList.toggle('selected', c.dataset.resolution === fallback));
+        updateActionButtonLabel();
+      }
+    }
+  }
+
+  // --- Clip-Aware Trim Guard (§1.2 Decision #5) ---
+  function currentClipDuration() {
+    const { active, start, end, total } = AppState.trim;
+    const isWhole = start === 0 && end >= total;
+    return active && !isWhole ? Math.max(0, end - start) : (total || 0);
+  }
+
+  function updateTrimLimitBanner() {
+    const banner = $('#trim-limit-banner');
+    const text = $('#trim-limit-text');
+    if (!banner || !text) return;
+
+    if (!isHostedMode() || AppState.mode === 'srt') {
+      banner.hidden = true;
+      banner.classList.remove('over');
+      updateActionButtonLabel();
+      return;
+    }
+
+    const limit = maxDurationSeconds();
+    const duration = currentClipDuration();
+
+    if (duration <= limit) {
+      banner.hidden = true;
+      banner.classList.remove('over');
+      updateActionButtonLabel();
+      return;
+    }
+
+    banner.hidden = false;
+    banner.classList.add('over');
+
+    const sourceTotal = AppState.trim.total || duration;
+    const whole = sourceTotal > limit;
+    const limitLabel = `${Math.round(limit / 60)} minutes`;
+
+    if (whole) {
+      text.innerHTML =
+        `<b>Hosted limit: ${limitLabel}.</b> This video is ${Math.round(sourceTotal / 60)} minutes long. ` +
+        `Trim a segment under ${limitLabel} below, or download the Desktop or Android app for full videos.`;
+    } else {
+      text.innerHTML =
+        `<b>Selected trim is too long.</b> The chosen segment is ${Math.round(duration / 60)} minutes; ` +
+        `the hosted limit is ${limitLabel}. Shorten the range, or download the Desktop or Android app.`;
+    }
+
+    updateActionButtonLabel();
+  }
+
   // --- API Client: Download & SSE Pipeline ---
   async function startDownload() {
     const targetUrl = AppState.currentUrl || (AppState.metadata && AppState.metadata.url) || '';
@@ -637,6 +979,13 @@
 
       if (!resp.ok) {
         const err = await resp.json().catch(() => ({}));
+        // 429 is a designed, recoverable state carrying a gate-specific upgrade
+        // prompt. Surfacing it verbatim preserves the conversion moment instead
+        // of flattening it into a generic failure (§1.2 Decision #11).
+        if (resp.status === 429) {
+          showRateLimited(err.detail || 'Too many concurrent downloads. Please wait and try again.');
+          return;
+        }
         throw new Error(err.detail || 'Download request rejected.');
       }
 
@@ -888,6 +1237,12 @@
     if (saveMediaBtn) {
       saveMediaBtn.href = data.download_url;
       saveMediaBtn.setAttribute('download', data.filename || 'media');
+      // Start the retention countdown at the moment the file is actually
+      // requested. This is the only event that triggers the server-side purge,
+      // so it is the only honest moment to count down from (§1.2 Decision #8).
+      saveMediaBtn.addEventListener('click', () => {
+        if (isHostedMode()) startDeletionCountdown(AppState.retentionSeconds);
+      }, { once: true });
     }
     const saveLbl = $('#btn-save-label');
     if (saveLbl) saveLbl.textContent = `Save ${AppState.mode.toUpperCase()}`;
@@ -903,7 +1258,11 @@
       if (srtSz) srtSz.textContent = data.srt_size || '2.4 KB';
       if (subsBtn) {
         subsBtn.hidden = false;
-        subsBtn.onclick = () => { window.location.href = data.srt_url; };
+        subsBtn.onclick = () => {
+          // The SRT is a separate server object with its own purge schedule.
+          if (isHostedMode()) startDeletionCountdown(AppState.retentionSeconds);
+          window.location.href = data.srt_url;
+        };
       }
     } else {
       if (srtCard) srtCard.hidden = true;
@@ -920,12 +1279,65 @@
       downloadUrl: data.download_url
     });
 
-    // Start 30-min deletion countdown
-    startDeletionCountdown(30 * 60);
+    // Ephemeral notice: static until the user saves, then a live countdown
+    // mirroring the server's purge-on-retrieval window (§1.2 Decision #8).
+    renderRetentionNotice();
+    stopDeletionCountdown();
 
     setTimeout(() => {
       showScreen('ready');
     }, 280);
+  }
+
+  function stopDeletionCountdown() {
+    if (AppState.deletionTimer) {
+      clearInterval(AppState.deletionTimer);
+      AppState.deletionTimer = null;
+    }
+  }
+
+  function renderRetentionNotice() {
+    const notice = $('#ready-retention-notice');
+    const text = $('#ready-retention-text');
+    if (!notice || !text) return;
+    notice.hidden = false;
+
+    // A new job supersedes any countdown still running from a previous one.
+    if (isHostedMode()) {
+      text.innerHTML =
+        '<b>Ephemeral server:</b> this file is deleted from the server after you save it. ' +
+        'Save it now &mdash; it will not be kept.';
+    } else {
+      // Desktop writes to the user's own machine; there is nothing to count down.
+      text.innerHTML = '<b>Saved to your Downloads folder.</b> This file stays on your machine.';
+    }
+  }
+
+  // Called only when the user actually triggers the save, which is the moment
+  // the server schedules the purge.
+  function startDeletionCountdown(seconds) {
+    stopDeletionCountdown();
+
+    const notice = $('#ready-retention-notice');
+    const text = $('#ready-retention-text');
+    if (!notice || !text) return;
+
+    notice.hidden = false;
+    let left = Math.max(1, Math.round(seconds));
+    text.innerHTML =
+      `<b>Saving now.</b> This file is deleted from the server in ` +
+      `<b id="ready-deletion-timer">${formatTimeMMSS(left)}</b>.`;
+
+    AppState.deletionTimer = setInterval(() => {
+      left--;
+      const timer = $('#ready-deletion-timer');
+      if (left <= 0) {
+        stopDeletionCountdown();
+        text.innerHTML = '<b>File deleted.</b> The server no longer has a copy.';
+        return;
+      }
+      if (timer) timer.textContent = formatTimeMMSS(left);
+    }, 1000);
   }
 
   function startPollingFallback(jobId) {
@@ -954,20 +1366,41 @@
     }, 1000);
   }
 
-  function startDeletionCountdown(seconds) {
-    if (AppState.deletionTimer) clearInterval(AppState.deletionTimer);
-    let left = seconds;
-    const timerEl = $('#ready-deletion-timer');
+  function showRateLimited(detail) {
+    if (AppState.eventSource) AppState.eventSource.close();
+    if (AppState.pollTimer) clearInterval(AppState.pollTimer);
 
-    AppState.deletionTimer = setInterval(() => {
-      left--;
-      if (left <= 0) {
-        clearInterval(AppState.deletionTimer);
-        if (timerEl) timerEl.textContent = 'Expired';
-      } else if (timerEl) {
-        timerEl.textContent = formatTimeMMSS(left);
+    // Return the user to the configure screen rather than a dead-end error:
+    // their settings are intact and retrying costs one click.
+    showScreen('choose');
+
+    const banner = $('#trim-limit-banner');
+    if (banner && detail) {
+      const text = $('#trim-limit-text');
+      if (text) text.textContent = detail;
+      banner.hidden = false;
+      banner.classList.remove('over');
+    }
+
+    const hint = $('#error-upgrade-hint');
+    if (hint && detail) {
+      const hintText = $('#error-upgrade-text');
+      if (hintText) hintText.textContent = detail;
+      hint.hidden = false;
+      const cta = $('#error-upgrade-cta');
+      if (cta) {
+        const downloads = (AppState.capabilities && AppState.capabilities.downloads) || {};
+        const target = PLATFORM_TARGETS.find((t) => t.key === detectPlatform()) || PLATFORM_TARGETS[0];
+        const url = downloads[target.id];
+        if (url) {
+          cta.href = url;
+          cta.removeAttribute('aria-disabled');
+          cta.hidden = false;
+        } else {
+          cta.hidden = true;
+        }
       }
-    }, 1000);
+    }
   }
 
   function showError(msg) {
@@ -999,7 +1432,17 @@
           subtitles: { lang: AppState.subtitles.lang || 'en' }
         })
       });
-      if (!resp.ok) throw new Error('Subtitles unavailable.');
+      if (!resp.ok) {
+        if (resp.status === 429) {
+          // Same designed state as the main path; do not collapse it into
+          // "Subtitles unavailable." (§1.2 Decision #11).
+          btn.disabled = false;
+          btn.textContent = 'Save .srt';
+          showRateLimited((await resp.json().catch(() => ({}))).detail || 'Too many concurrent downloads.');
+          return;
+        }
+        throw new Error('Subtitles unavailable.');
+      }
       const data = await resp.json();
 
       // Poll briefly for instant srt completion
@@ -1337,7 +1780,13 @@
 
   // --- PWA Service Worker & Install Prompt ---
   function initPWA() {
-    if ('serviceWorker' in navigator) {
+    // Hosted mode deliberately suppresses install prompts: the site's value
+    // proposition is the native apps, and a PWA prompt competes with them.
+    // iOS gets no prompt regardless of mode (§1.2 Decision #8).
+    const isIos = /iPhone|iPad|iPod/i.test(navigator.userAgent || '');
+    const pwaAllowed = !isHostedMode() && !isIos;
+
+    if (pwaAllowed && 'serviceWorker' in navigator) {
       navigator.serviceWorker.register('/sw.js').catch((err) => {
         console.warn('SW registration failed:', err);
       });
@@ -1345,7 +1794,9 @@
 
     let deferredPrompt = null;
     window.addEventListener('beforeinstallprompt', (e) => {
+      // Always cancel; on hosted/iOS we never intend to show it.
       e.preventDefault();
+      if (!pwaAllowed) return;
       deferredPrompt = e;
       const strip = $('#pwa-install-strip');
       if (strip && !localStorage.getItem('mg-dismiss-install')) {
@@ -1380,7 +1831,7 @@
     initTheme();
     renderHistory();
     setupEventListeners();
-    initPWA();
+    initPromoStrip();
 
     if ($('#view-choose')) {
       initChoosePage();
@@ -1389,6 +1840,20 @@
     if (!navigator.onLine) {
       showScreen('offline');
     }
+
+    // Capabilities are advisory: they refine limits and download URLs but must
+    // never gate rendering or block the Grab button. Load after first paint so
+    // the page is usable immediately and re-apply gating if anything changes.
+    loadCapabilities().then((caps) => {
+      if (!caps) return;
+      initPromoStrip();
+      applyDownloadTargets();
+      if ($('#view-choose') && AppState.metadata) {
+        applyQualityGating(AppState.metadata.qualities || []);
+        updateTrimLimitBanner();
+      }
+      updateActionButtonLabel();
+    });
   });
 
 })();

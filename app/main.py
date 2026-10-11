@@ -2,11 +2,13 @@ import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
+from app import config
 from app.config import STATIC_DIR
 from app.api.routes import router as api_router
 from app.services.cleaner import periodic_cleaner_daemon
+from app.services.templates import render_html
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -77,11 +79,27 @@ async def serve_favicon_ico():
     )
 
 # Root SPA endpoints
+def _serve_page(filename: str) -> HTMLResponse:
+    """Serve an HTML page with the active execution mode injected.
+
+    Mode is authoritative from the server tag; the frontend only uses
+    /api/capabilities for numeric limits and download URLs (§1.2 Decision #9).
+    """
+    html = (STATIC_DIR / filename).read_text(encoding="utf-8")
+    return HTMLResponse(
+        content=render_html(
+            html,
+            mode="hosted" if config.IS_HOSTED else "desktop",
+            retention_seconds=config.CLEANUP_GRACE_SECONDS,
+        ),
+        media_type="text/html",
+    )
+
 @app.get("/", include_in_schema=False)
 async def serve_index():
-    return FileResponse(STATIC_DIR / "index.html", media_type="text/html")
+    return _serve_page("index.html")
 
 @app.get("/choose", include_in_schema=False)
 @app.get("/choose.html", include_in_schema=False)
 async def serve_choose():
-    return FileResponse(STATIC_DIR / "choose.html", media_type="text/html")
+    return _serve_page("choose.html")

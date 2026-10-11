@@ -18,6 +18,7 @@
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Gabarito:wght@500;600;700;800&family=Onest:wght@400;500;600&display=swap">
 
   <link rel="stylesheet" href="/css/app.css">
+  <!--mg-mode-->
 </head>
 <body>
 
@@ -77,8 +78,26 @@
     </div>
   </header>
 
-  <!-- PWA Install Strip -->
-  <!-- PWA Install Strip -->
+  <!-- Hosted Promo Strip: native app upsell (§1.2 Decision #3) -->
+  <div class="strip promo-strip" id="hosted-promo-strip" hidden>
+    <div class="l">
+      <div class="appicon" aria-hidden="true"><svg viewBox="0 0 64 64"><use href="#brand-mark"/></svg></div>
+      <span id="hosted-promo-text">Get 4K &amp; unlimited downloads with the native app.</span>
+    </div>
+    <div class="r">
+      <a class="btn btn-primary btn-sm" id="hosted-promo-cta" href="#" download>Download</a>
+      <button class="btn btn-quiet btn-sm" id="hosted-promo-other" type="button" aria-expanded="false"
+              aria-controls="hosted-promo-panel">Other Platforms</button>
+    </div>
+    <div class="promo-panel" id="hosted-promo-panel" hidden>
+      <a class="promo-item" id="hosted-promo-windows" href="#" download>Windows app (.exe)</a>
+      <a class="promo-item" id="hosted-promo-linux" href="#" download>Linux app (binary)</a>
+      <a class="promo-item" id="hosted-promo-android" href="#" download>Android app (.apk)</a>
+      <span class="promo-note" id="hosted-promo-ios-note">iPhone and iPad: use this site in your browser. Install prompts are disabled.</span>
+    </div>
+  </div>
+
+  <!-- PWA Install Strip: desktop mode only, suppressed on hosted (§1.2 Decision #8) -->
   <div class="strip" id="pwa-install-strip" hidden>
     <div class="l">
       <div class="appicon" aria-hidden="true"><svg viewBox="0 0 64 64"><use href="#brand-mark"/></svg></div>
