@@ -14,10 +14,16 @@ Environment=PYTHONUNBUFFERED=1
 ExecStart=/opt/mediagrab/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips='*'
 Restart=always
 RestartSec=3
+TimeoutStartSec=60
 StandardOutput=journal
 StandardError=journal
 
 # The app writes only inside /opt/mediagrab/downloads.
+# NOTE: ReadWritePaths is resolved when the unit's namespace is set up, which
+# happens BEFORE any ExecStartPre runs. The directory must therefore already
+# exist on disk -- creating it from ExecStartPre fails with
+# status=226/NAMESPACE because the sandbox cannot create the very path it
+# needs. provision.sh creates it.
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=full

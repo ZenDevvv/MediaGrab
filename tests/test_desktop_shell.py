@@ -524,6 +524,29 @@ def test_provision_script_is_idempotent_and_generates_secret():
     assert "/api/capabilities" in script, "Must gate completion on a readiness probe"
 
 
+def test_systemd_does_not_try_to_create_its_own_sandbox_path():
+    """Regression: ExecStartPre cannot fix a missing ReadWritePaths dir.
+
+    systemd resolves ReadWritePaths while setting up the namespace, before any
+    ExecStartPre runs, so an ExecStartPre mkdir fails with 226/NAMESPACE and the
+    service never starts. The directory must be created by provisioning instead.
+    """
+    unit = Path("deploy/mediagrab.service").read_text()
+    directives = [
+        line.strip() for line in unit.splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    ]
+    assert not any(d.startswith("ExecStartPre") for d in directives), \
+        "Sandbox paths are resolved before ExecStartPre; creating them there fails"
+    assert "226/NAMESPACE" in unit, "Must document why the dir is created externally"
+
+    provision = Path("deploy/provision.sh").read_text()
+    assert 'mkdir -p "$APP_DIR/downloads"' in provision or \
+           'mkdir -p "$REMOTE_DIR/downloads"' in provision or \
+           'mkdir -p /opt/mediagrab/downloads' in provision, \
+        "Provisioning must create the downloads dir before the unit starts"
+
+
 def test_systemd_unit_runs_hosted_with_retention():
     unit = Path("deploy/mediagrab.service").read_text()
     assert "MEDIAGRAB_MODE=hosted" in unit
