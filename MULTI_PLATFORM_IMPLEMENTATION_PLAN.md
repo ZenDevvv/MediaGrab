@@ -76,6 +76,21 @@ M3's "save directly to `~/Downloads`" requirement collides with retention code t
 
 **Verification scope:** the Windows `.exe` cannot be executed from the Linux build host, so M3 is verified on Linux only. The PyInstaller spec and GitHub Actions workflow are delivered unproven; the maintainer has a Windows VM and verifies manually. No claim of Windows correctness is made without that run.
 
+### 1.4 Milestone 5 Gate (Hosted Deployment)
+
+**Decision #15 — push-based deployment.** Code reaches the Freestyle VM (`vm-4ea425a9eae64c4bacd5fde0b2d9a99d`, team `acct-00a8ab64d7974b278232fad8bf8b95c0`) via `rsync` from the development host, with a systemd unit managing the service. Freestyle VMs may be ephemeral with no persistent volume, so the deploy must be idempotent and re-runnable: any redeploy is one command and rebuilds from scratch.
+
+**Decision #16 — the promo strip must not ship dead links.** `#hosted-promo-strip` (§1.2 Decision #3) links to `github.com/ZenDevvv/MediaGrab/releases/latest/download/...`. No release exists, so that URL 404s, and Windows binaries cannot be built from the Linux host at all. Deploying before resolving this would advertise a product that fails on click. Until real artifacts exist, the download URLs resolve to an honest "coming soon" destination rather than a 404. This is a **single configuration point** — `GITHUB_RELEASES_URL` — so flipping to real binaries is one value change, not a code edit.
+
+**Deployment checklist:**
+- `MEDIAGRAB_MODE=hosted` and a **persistent `SESSION_SECRET`** (an unset value regenerates per process, resetting every user's gate history on each restart)
+- `BEHIND_PROXY` set only if traffic genuinely arrives via a trusted proxy
+- Zero-retention confirmed (`RETENTION_ENABLED=true`) — the output directory is server-side and must be swept
+- Disk budget: 3 concurrent slots × 1 GB cap + overhead must fit the 16 GB volume
+- Readiness probe on `/api/capabilities` before traffic is routed
+
+**Credentials.** `FREESTYLE_API_KEY` is not present on the development host; the maintainer supplies it. No credential is ever committed to the repository.
+
 ---
 
 ## 2. Ecosystem Architecture

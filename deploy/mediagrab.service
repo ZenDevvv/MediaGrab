@@ -1,0 +1,28 @@
+[Unit]
+Description=MediaGrab hosted instance
+Documentation=file:/opt/mediagrab/MULTI_PLATFORM_IMPLEMENTATION_PLAN.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/mediagrab
+EnvironmentFile=-/etc/mediagrab.env
+Environment=MEDIAGRAB_MODE=hosted
+Environment=RETENTION_ENABLED=true
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/mediagrab/venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips='*'
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+# The app writes only inside /opt/mediagrab/downloads.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/opt/mediagrab/downloads
+
+[Install]
+WantedBy=multi-user.target

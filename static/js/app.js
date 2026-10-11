@@ -754,20 +754,32 @@
     return 'linux';
   }
 
+  function isRealDownload(url) {
+    // A relative URL means the server has not published binaries yet and is
+    // pointing at the "coming soon" page. The markup carries a `download`
+    // attribute intended for real artifacts; leaving it on a page link would
+    // save the HTML file instead of navigating (§1.4 Decision #16).
+    return Boolean(url) && !/^\//.test(url);
+  }
+
   function applyDownloadTargets() {
     const downloads = (AppState.capabilities && AppState.capabilities.downloads) || {};
     PLATFORM_TARGETS.forEach((t) => {
       const el = $(`#hosted-promo-${t.key}`);
       if (!el) return;
       const url = downloads[t.id];
-      if (url) {
+      if (isRealDownload(url)) {
         el.href = url;
+        el.setAttribute('download', '');
         el.removeAttribute('aria-disabled');
+        el.title = 'Download the MediaGrab app';
       } else {
-        // No URL available (capabilities unavailable): keep the control
-        // visible but inert rather than linking somewhere unknown.
-        el.href = '#';
-        el.setAttribute('aria-disabled', 'true');
+        // Either binaries are unpublished (relative URL) or capabilities failed.
+        // Keep the control visible and honest instead of linking to a 404.
+        el.href = url || '/downloads';
+        el.removeAttribute('download');
+        el.removeAttribute('aria-disabled');
+        el.title = 'App downloads are not published yet';
       }
     });
 
@@ -776,12 +788,14 @@
       const target = PLATFORM_TARGETS.find((t) => t.key === detectPlatform()) || PLATFORM_TARGETS[0];
       const url = downloads[target.id];
       cta.textContent = target.cta;
-      if (url) {
+      if (isRealDownload(url)) {
         cta.href = url;
+        cta.setAttribute('download', '');
         cta.removeAttribute('aria-disabled');
       } else {
-        cta.href = '#';
-        cta.setAttribute('aria-disabled', 'true');
+        cta.href = url || '/downloads';
+        cta.removeAttribute('download');
+        cta.removeAttribute('aria-disabled');
       }
     }
   }

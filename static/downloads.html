@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Download MediaGrab</title>
+  <meta name="description" content="Native MediaGrab desktop and Android apps.">
+  <meta name="robots" content="noindex">
+  <link rel="icon" href="/icons/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/css/app.css">
+  <style>
+    .dl-wrap { max-width: 680px; margin: 0 auto; padding: 48px 20px 64px; }
+    .dl-card { background: var(--card); border: 1.5px solid var(--line); border-radius: 18px; padding: 28px; }
+    .dl-item { display: flex; gap: 12px; align-items: center; justify-content: space-between;
+               flex-wrap: wrap; padding: 14px 0; border-bottom: 1.5px solid var(--soft); }
+    .dl-item:last-child { border-bottom: 0; }
+    .dl-item b { display: block; font-size: 16px; }
+    .dl-item span { color: var(--muted); font-size: 13.5px; }
+    .dl-note { margin-top: 20px; padding: 14px 16px; border-radius: 12px;
+               background: var(--accent-soft); border: 1.5px solid var(--edge); font-size: 14px; }
+    .dl-status { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; color: var(--muted); }
+    .dl-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  </style>
+</head>
+<body>
+  <main class="dl-wrap">
+    <header style="margin-bottom: 28px;">
+      <a href="/" style="display:inline-block;margin-bottom:18px;color:var(--muted);text-decoration:none;font-size:13.5px;">&larr; Back to MediaGrab</a>
+      <h1 style="font-size:34px;margin:0 0 8px;">Native apps</h1>
+      <p style="color:var(--muted);margin:0;">
+        MediaGrab's desktop and Android apps are built in CI and published to the project's
+        GitHub releases.
+      </p>
+    </header>
+
+    <div class="dl-card">
+      <div class="dl-item">
+        <div><b>Windows</b><span>MediaGrab-Windows.zip &middot; desktop app</span></div>
+        <span class="dl-status"><span class="dl-dot"></span> Not published yet</span>
+      </div>
+      <div class="dl-item">
+        <div><b>Linux</b><span>MediaGrab-Linux-x86_64.tar.gz &middot; desktop app</span></div>
+        <span class="dl-status"><span class="dl-dot"></span> Not published yet</span>
+      </div>
+      <div class="dl-item">
+        <div><b>Android</b><span>MediaGrab-arm64-v8a.apk &middot; phone app</span></div>
+        <span class="dl-status"><span class="dl-dot"></span> Not published yet</span>
+      </div>
+
+      <div class="dl-note">
+        No binaries have been published yet. The hosted server here runs fine &mdash;
+        1080p, 60-minute clips, and up to 1&nbsp;GB per download.
+        The native apps remove those limits.
+      </div>
+    </div>
+
+    <p style="margin-top:24px;color:var(--muted);font-size:13.5px;">
+      Builds are produced automatically by GitHub Actions and attached to tagged releases.
+      They appear on this page automatically once published.
+    </p>
+  </main>
+</body>
+</html>

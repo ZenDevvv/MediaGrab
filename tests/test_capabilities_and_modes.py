@@ -130,16 +130,43 @@ async def test_capabilities_hosted_mode_advertises_limits(monkeypatch, hosted):
 
 
 @pytest.mark.asyncio
-async def test_capabilities_release_urls_point_at_real_repo(monkeypatch):
-    monkeypatch.setattr(config, "IS_HOSTED", False)
+async def test_download_targets_never_point_at_a_404(monkeypatch):
+    """§1.4 Decision #16: an unpublished deployment must not advertise dead links.
+
+    GitHub's /releases/latest/download/ path 404s until a release exists, so
+    until then every target must resolve to the coming-soon page instead.
+    """
+    from app.services import downloads as dl
+
+    monkeypatch.setattr(dl, "DOWNLOADS_AVAILABLE", False)
+    urls = dl.release_urls()
+    assert set(urls) == {"windows_url", "linux_url", "android_url"}
+    for key, url in urls.items():
+        assert url.startswith("/"), f"{key} would 404: {url}"
+
+
+def test_download_targets_switch_to_real_assets_when_published(monkeypatch):
+    from app.services import downloads as dl
+
+    monkeypatch.setattr(dl, "DOWNLOADS_AVAILABLE", True)
+    urls = dl.release_urls()
+    for key, url in urls.items():
+        assert "github.com/ZenDevvv/MediaGrab/releases/latest/download/" in url, url
+    # Asset names must match what build-desktop.yml actually attaches.
+    assert urls["windows_url"].endswith("MediaGrab-Windows.zip")
+    assert urls["linux_url"].endswith("MediaGrab-Linux-x86_64.tar.gz")
+    assert urls["android_url"].endswith("MediaGrab-arm64-v8a.apk")
+
+
+@pytest.mark.asyncio
+async def test_capabilities_exposes_download_targets(monkeypatch):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         resp = await client.get("/api/capabilities")
-    downloads = resp.json()["downloads"]
+    assert resp.status_code == 200
+    downloads_body = resp.json()["downloads"]
     for key in ("windows_url", "linux_url", "android_url"):
-        assert "github.com/ZenDevvv/MediaGrab/releases/latest" in downloads[key]
-    assert downloads["windows_url"].endswith(".exe")
-    assert downloads["android_url"].endswith(".apk")
+        assert downloads_body[key], f"{key} must never be empty"
 
 
 def test_watchdog_never_outruns_the_grace_window():

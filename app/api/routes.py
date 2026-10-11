@@ -25,6 +25,7 @@ from app.services.extractor import inspect_url
 from app.services.jobs import job_manager
 from app.services.downloader import execute_download
 from app.services.cleaner import deferred_file_removal
+from app.services.downloads import release_urls
 from app.services.metadata import GuardrailError, get_cached_metadata, load_and_validate
 from app.services.network import (
     Identity,
@@ -38,12 +39,12 @@ router = APIRouter(prefix="/api")
 
 
 def _release_urls() -> DownloadsResponse:
-    base = config.GITHUB_RELEASES_URL.rstrip("/")
-    return DownloadsResponse(
-        windows_url=f"{base}/download/MediaGrab-Windows.exe",
-        linux_url=f"{base}/download/MediaGrab-Linux-x86_64.tar.gz",
-        android_url=f"{base}/download/MediaGrab-arm64-v8a.apk",
-    )
+    """Download targets for the native apps.
+
+    Sourced from app.services.downloads so a deployment without published
+    binaries never advertises a 404 (§1.4 Decision #16).
+    """
+    return DownloadsResponse(**release_urls())
 
 
 @router.get("/capabilities", response_model=CapabilitiesResponse)

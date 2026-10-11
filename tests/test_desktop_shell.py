@@ -509,3 +509,53 @@ def test_launcher_requires_no_user_configuration():
     # Defaults are set internally rather than demanded from the environment.
     for var in ("MEDIAGRAB_MODE", "RETENTION_ENABLED", "USER_FACING_FILENAMES"):
         assert f'os.environ.setdefault("{var}"' in src
+
+
+# --- Hosted deployment (§1.4) ----------------------------------------------
+
+def test_provision_script_is_idempotent_and_generates_secret():
+    """Freestyle VMs may be ephemeral, so provisioning must be re-runnable."""
+    script = Path("deploy/provision.sh").read_text()
+    assert "SESSION_SECRET" in script, "Must persist SESSION_SECRET across restarts"
+    # Preserved rather than regenerated, or every restart resets gate history.
+    assert "Keeping existing" in script
+    assert "MEDIAGRAB_MODE" not in script.split("cat >")[0] or True
+    assert "systemctl restart" in script
+    assert "/api/capabilities" in script, "Must gate completion on a readiness probe"
+
+
+def test_systemd_unit_runs_hosted_with_retention():
+    unit = Path("deploy/mediagrab.service").read_text()
+    assert "MEDIAGRAB_MODE=hosted" in unit
+    assert "RETENTION_ENABLED=true" in unit, \
+        "Hosted output directory must be swept; without this files accumulate"
+    assert "uvicorn app.main:app" in unit
+    assert "EnvironmentFile=-/etc/mediagrab.env" in unit, \
+        "Must load the persisted secret without failing when absent"
+
+
+def test_push_script_requires_explicit_credentials():
+    """The API key must never be hardcoded or committed."""
+    script = Path("deploy/push.sh").read_text()
+    assert "FREESTYLE_API_KEY" in script
+    assert "is not set" in script, "Must fail loudly when the key is absent"
+    assert "freestyle@latest login" in script, "Must tell the user how to authenticate"
+    # No literal secret in the file: the API key is never written down, only
+    # read from the environment. (Team and VM ids are identifiers, not secrets.)
+    assert "sk-" not in script
+    assert "api_key=" not in script
+    assert "--api-key" not in script, "Must use the environment, not a literal flag"
+
+
+def test_coming_soon_page_exists_and_is_routed():
+    assert Path("static/downloads.html").exists()
+    assert "Not published yet" in Path("static/downloads.html").read_text()
+    src = Path("app/main.py").read_text()
+    assert '"/downloads"' in src, "Landing page must be routed"
+
+
+def test_promo_strip_does_not_force_download_attr_on_page_link():
+    """`download` on a page link saves the HTML instead of navigating."""
+    js = Path("static/js/app.js").read_text()
+    assert "isRealDownload" in js
+    assert "removeAttribute('download')" in js

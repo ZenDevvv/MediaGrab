@@ -99,6 +99,11 @@ def _serve_page(filename: str) -> HTMLResponse:
 async def serve_index():
     return _serve_page("index.html")
 
+@app.get("/downloads", include_in_schema=False)
+async def serve_downloads():
+    return FileResponse(STATIC_DIR / "downloads.html", media_type="text/html")
+
+
 @app.get("/choose", include_in_schema=False)
 @app.get("/choose.html", include_in_schema=False)
 async def serve_choose():
