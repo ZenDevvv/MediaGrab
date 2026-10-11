@@ -19,4 +19,9 @@ RUN mkdir -p downloads
 
 EXPOSE 8000
 
+# The container is the shared public instance, so hosted guardrails apply.
+# Desktop/native builds ship their own defaults and never set this.
+ENV MEDIAGRAB_MODE=hosted
+ENV BEHIND_PROXY=false
+
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

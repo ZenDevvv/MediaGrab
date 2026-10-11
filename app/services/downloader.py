@@ -4,9 +4,20 @@ import re
 from pathlib import Path
 from typing import Dict, Any, Optional
 import yt_dlp
+from app import config
 from app.api.schemas import DownloadRequest
 from app.config import DOWNLOADS_DIR
 from app.services.jobs import job_manager
+
+
+class DownloadCancelled(Exception):
+    """Raised inside the worker when a job is aborted mid-flight."""
+
+
+def _raise_if_cancelled(job_id: str) -> None:
+    job = job_manager.get_job(job_id)
+    if job is not None and job.is_cancelled:
+        raise DownloadCancelled("Download cancelled.")
 
 def sanitize_filename(name: str) -> str:
     # Remove filesystem illegal characters
@@ -52,6 +63,7 @@ def _handle_ffmpeg_progress(
     metrics: Dict[str, str]
 ):
     progress_status = metrics.get('progress')
+    _raise_if_cancelled(job_id)
     out_time_us_str = metrics.get('out_time_us')
     speed_str = metrics.get('speed', '').strip()
     total_size_str = metrics.get('total_size')
@@ -128,6 +140,7 @@ def create_ydl_opts(job_id: str, request: DownloadRequest, progress_port: Option
     out_template = str(DOWNLOADS_DIR / f"{job_id}_%(title).100B.%(ext)s")
 
     def progress_hook(d: Dict[str, Any]):
+        _raise_if_cancelled(job_id)
         status = d.get('status')
         if status == 'downloading':
             downloaded = d.get('downloaded_bytes', 0)
@@ -197,6 +210,12 @@ def create_ydl_opts(job_id: str, request: DownloadRequest, progress_port: Option
         'buffersize': 1024 * 1024,
         'extractor_args': {'youtube': {'player_client': ['web', 'default']}},
     }
+
+    # In-flight size backstop. yt-dlp evaluates this per stream, so it is a
+    # coarse net rather than a precise cap -- the pre-flight estimate in
+    # metadata.validate_request is what actually rejects oversized requests.
+    if config.IS_HOSTED:
+        opts['max_filesize'] = config.HOSTED_MAX_FILESIZE_ARG
 
     if progress_port:
         opts['external_downloader_args'] = {
@@ -319,8 +338,17 @@ async def execute_download(job_id: str, request: DownloadRequest):
         server = None
         progress_port = None
 
+    def purge_partials() -> None:
+        """Remove every artifact this job produced, completed or not."""
+        for leftover in DOWNLOADS_DIR.glob(f"{job_id}_*"):
+            try:
+                leftover.unlink()
+            except OSError:
+                pass
+
     try:
         await loop.run_in_executor(None, _sync_download, job_id, request, progress_port)
+        _raise_if_cancelled(job_id)
 
         # Locate completed files
         matching_files = list(DOWNLOADS_DIR.glob(f"{job_id}_*"))
@@ -369,9 +397,28 @@ async def execute_download(job_id: str, request: DownloadRequest):
             stage="Ready to save"
         )
 
+    except DownloadCancelled:
+        purge_partials()
+        job_manager.update_job(job_id, status="cancelled", stage="Download cancelled")
     except yt_dlp.utils.DownloadError as e:
-        err_msg = str(e).split('ERROR:')[-1].strip()
-        job_manager.update_job(job_id, status="error", error=f"Download failed: {err_msg}")
+        raw = str(e)
+        err_msg = raw.split('ERROR:')[-1].strip()
+        job = job_manager.get_job(job_id)
+        if job is not None and job.is_cancelled:
+            purge_partials()
+            job_manager.update_job(job_id, status="cancelled", stage="Download cancelled")
+        elif "File is larger than max-filesize" in raw or "max-filesize" in raw:
+            purge_partials()
+            job_manager.update_job(
+                job_id,
+                status="error",
+                error=(
+                    "This file is larger than the hosted server limit. "
+                    "Download the Desktop or Android app for unlimited file size."
+                ),
+            )
+        else:
+            job_manager.update_job(job_id, status="error", error=f"Download failed: {err_msg}")
     except Exception as e:
         job_manager.update_job(job_id, status="error", error=f"Processing failed: {str(e)}")
     finally:

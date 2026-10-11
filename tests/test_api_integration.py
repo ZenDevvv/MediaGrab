@@ -1,7 +1,16 @@
 import pytest
 from httpx import AsyncClient, ASGITransport
+from app import config
 from app.main import app
 from app.services.jobs import job_manager
+
+
+# These use placeholder URLs that only resolve to a job in desktop mode. Hosted
+# mode now rejects them at the metadata guardrail, which is the correct outcome.
+requires_desktop = pytest.mark.skipif(
+    config.IS_HOSTED,
+    reason="placeholder URLs are rejected by hosted guardrails before a job is created",
+)
 
 @pytest.mark.asyncio
 async def test_pwa_root_endpoints():
@@ -42,6 +51,7 @@ async def test_pwa_root_endpoints():
         assert resp.headers["content-type"].startswith("image/x-icon")
 
 @pytest.mark.asyncio
+@requires_desktop
 async def test_api_download_and_progress_flow():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -69,6 +79,7 @@ async def test_api_download_and_progress_flow():
         assert progress_data["status"] in ["queued", "extracting", "downloading", "error"]
 
 @pytest.mark.asyncio
+@requires_desktop
 async def test_api_events_stream():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:

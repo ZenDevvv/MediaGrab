@@ -1,11 +1,21 @@
 import asyncio
 import time
 from pathlib import Path
+
+from app import config
 from app.config import DOWNLOADS_DIR, ORPHAN_MAX_AGE_SECONDS, CLEANUP_INTERVAL_SECONDS
 from app.services.jobs import job_manager
 
-async def deferred_file_removal(file_path: Path, delay_seconds: int = 300):
-    """Wait for grace period, then delete file from ephemeral storage."""
+
+async def deferred_file_removal(file_path: Path, delay_seconds: int = None):
+    """Delete a file after the post-stream grace window.
+
+    Scheduled from ``GET /api/file`` only, so the countdown starts when the user
+    actually begins saving rather than when the job became ready. A file left on
+    the ready screen is never yanked out from under them.
+    """
+    if delay_seconds is None:
+        delay_seconds = config.CLEANUP_GRACE_SECONDS
     try:
         await asyncio.sleep(delay_seconds)
         if file_path.exists():
@@ -13,26 +23,67 @@ async def deferred_file_removal(file_path: Path, delay_seconds: int = 300):
     except Exception as e:
         print(f"Deferred deletion error for {file_path}: {e}")
 
-def purge_orphan_files(max_age_seconds: int = ORPHAN_MAX_AGE_SECONDS):
-    """Scan downloads directory and delete any files older than max_age_seconds."""
+
+def _protected_paths() -> tuple:
+    """Returns ``(protected_paths, in_flight_prefixes)`` the watchdog must skip.
+
+    Two categories:
+      * in-flight jobs, matched by the ``{job_id}_`` filename prefix -- a
+        running download has no ``file_path`` yet, so its partials can only be
+        recognized by name;
+      * files that are ready but not yet retrieved. A user may sit on the ready
+        screen indefinitely, and a pure mtime sweep would delete the file out
+        from under them.
+    """
+    protected = set()
+    prefixes = set()
+    for job_id, job in getattr(job_manager, "_jobs", {}).items():
+        in_flight = job.status not in ("ready", "error", "cancelled")
+        if in_flight:
+            prefixes.add(f"{job_id}_")
+        for attr in ("file_path", "srt_path"):
+            path = getattr(job, attr, None)
+            if path and (in_flight or not job.claimed):
+                protected.add(str(Path(path).resolve()))
+    return protected, prefixes
+
+
+def purge_orphan_files(max_age_seconds: int = None):
+    """Delete files nobody ever claimed, plus expired job records.
+
+    In-flight jobs are skipped so the watchdog can never delete a file out from
+    under an active download.
+    """
+    if max_age_seconds is None:
+        max_age_seconds = ORPHAN_MAX_AGE_SECONDS
+
     now = time.time()
+    protected, in_flight_prefixes = _protected_paths()
+
     try:
         for item in DOWNLOADS_DIR.iterdir():
-            if item.is_file():
-                file_age = now - item.stat().st_mtime
-                if file_age > max_age_seconds:
-                    try:
-                        item.unlink()
-                    except Exception as e:
-                        print(f"Error removing orphan file {item}: {e}")
+            if not item.is_file():
+                continue
+            if item.name.startswith(tuple(in_flight_prefixes)) if in_flight_prefixes else False:
+                continue
+            if str(item.resolve()) in protected:
+                continue
+            file_age = now - item.stat().st_mtime
+            if file_age > max_age_seconds:
+                try:
+                    item.unlink()
+                except Exception as e:
+                    print(f"Error removing orphan file {item}: {e}")
     except Exception as e:
         print(f"Error scanning downloads directory: {e}")
 
-    # Also clean expired in-memory job records
     job_manager.clean_expired(current_time=now)
 
-async def periodic_cleaner_daemon(interval_seconds: int = CLEANUP_INTERVAL_SECONDS):
-    """Runs continuously in background lifespan, purging stale files and jobs."""
+
+async def periodic_cleaner_daemon(interval_seconds: int = None):
+    """Runs continuously in the background lifespan, purging stale files and jobs."""
+    if interval_seconds is None:
+        interval_seconds = CLEANUP_INTERVAL_SECONDS
     while True:
         try:
             await asyncio.sleep(interval_seconds)

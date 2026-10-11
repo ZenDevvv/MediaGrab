@@ -1,10 +1,14 @@
 import asyncio
+import threading
 import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional
+
+from app import config
 from app.api.schemas import DownloadRequest, JobProgressResponse
+
 
 @dataclass
 class Job:
@@ -24,13 +28,30 @@ class Job:
     srt_filename: Optional[str] = None
     error: Optional[str] = None
     created_at: float = field(default_factory=time.time)
-    expires_at: float = field(default_factory=lambda: time.time() + 1800)
+    expires_at: float = field(default_factory=lambda: time.time() + config.JOB_TTL_SECONDS)
     subscribers: List[asyncio.Queue] = field(default_factory=list)
+
+    queue_position: int = 0
+    active_slots: int = 0
+
+    # Set once the file has actually been served. Until then the orphan
+    # watchdog must leave it alone, even if it sits for a long time.
+    claimed: bool = False
+
+    # Cooperative cancellation flag shared with the worker thread.
+    cancel_event: threading.Event = field(default_factory=threading.Event)
+
+    def request_cancel(self) -> None:
+        self.cancel_event.set()
+
+    @property
+    def is_cancelled(self) -> bool:
+        return self.cancel_event.is_set()
 
     def to_response(self) -> JobProgressResponse:
         return JobProgressResponse(
             job_id=self.id,
-            status=self.status, # type: ignore
+            status=self.status,  # type: ignore[arg-type]
             progress=self.progress,
             speed=self.speed,
             eta=self.eta,
@@ -41,8 +62,11 @@ class Job:
             download_url=f"/api/file/{self.id}" if self.status == "ready" else None,
             srt_filename=self.srt_filename,
             srt_url=f"/api/file/{self.id}?srt=true" if self.srt_path else None,
-            error=self.error
+            error=self.error,
+            queue_position=self.queue_position,
+            active_slots=self.active_slots,
         )
+
 
 class JobManager:
     def __init__(self):
@@ -54,7 +78,7 @@ class JobManager:
         job = Job(
             id=job_id,
             url=request.url,
-            request=request
+            request=request,
         )
         self._jobs[job_id] = job
         return job
@@ -76,7 +100,10 @@ class JobManager:
         size: Optional[str] = None,
         srt_path: Optional[Path] = None,
         srt_filename: Optional[str] = None,
-        error: Optional[str] = None
+        error: Optional[str] = None,
+        queue_position: Optional[int] = None,
+        active_slots: Optional[int] = None,
+        claimed: Optional[bool] = None,
     ):
         job = self._jobs.get(job_id)
         if not job:
@@ -106,8 +133,25 @@ class JobManager:
             job.srt_filename = srt_filename
         if error is not None:
             job.error = error
+        if queue_position is not None:
+            job.queue_position = queue_position
+        if active_slots is not None:
+            job.active_slots = active_slots
+        if claimed is not None:
+            job.claimed = claimed
 
-        # Broadcast update to subscribers
+        resp = job.to_response()
+        for q in list(job.subscribers):
+            try:
+                q.put_nowait(resp)
+            except asyncio.QueueFull:
+                pass
+
+    def broadcast(self, job_id: str):
+        """Re-emit current state, e.g. when queue position changes."""
+        job = self._jobs.get(job_id)
+        if not job:
+            return
         resp = job.to_response()
         for q in list(job.subscribers):
             try:
@@ -120,7 +164,6 @@ class JobManager:
         if not job:
             return None
         q: asyncio.Queue = asyncio.Queue(maxsize=100)
-        # Push initial state
         q.put_nowait(job.to_response())
         job.subscribers.append(q)
         return q
@@ -134,7 +177,13 @@ class JobManager:
         now = current_time or time.time()
         expired = [jid for jid, j in self._jobs.items() if now > j.expires_at]
         for jid in expired:
+            job = self._jobs[jid]
+            # Anything still streaming gets a cancellation signal before the
+            # record disappears, otherwise the worker writes to a dead job.
+            if job.status not in ("ready", "error", "cancelled"):
+                job.request_cancel()
             del self._jobs[jid]
+
 
 # Global singleton
 job_manager = JobManager()

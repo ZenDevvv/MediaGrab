@@ -44,9 +44,29 @@ class DownloadRequest(BaseModel):
 class DownloadResponse(BaseModel):
     job_id: str
 
+class LimitsResponse(BaseModel):
+    max_resolution: Optional[str] = None
+    max_duration_seconds: Optional[int] = None
+    max_file_size_bytes: Optional[int] = None
+    concurrency_limit: Optional[int] = None
+    per_ip_limit: Optional[int] = None
+    idle_watchdog_seconds: Optional[int] = None
+    locked_resolutions: List[str] = Field(default_factory=list)
+
+class DownloadsResponse(BaseModel):
+    windows_url: Optional[str] = None
+    linux_url: Optional[str] = None
+    android_url: Optional[str] = None
+
+class CapabilitiesResponse(BaseModel):
+    mode: Literal["desktop", "hosted"]
+    retention_seconds: int
+    limits: LimitsResponse
+    downloads: DownloadsResponse
+
 class JobProgressResponse(BaseModel):
     job_id: str
-    status: Literal["queued", "extracting", "downloading", "processing", "ready", "error"]
+    status: Literal["queued", "extracting", "downloading", "processing", "ready", "error", "cancelled"]
     progress: float = 0.0
     speed: Optional[str] = None
     eta: Optional[str] = None
@@ -58,3 +78,5 @@ class JobProgressResponse(BaseModel):
     srt_filename: Optional[str] = None
     srt_url: Optional[str] = None
     error: Optional[str] = None
+    queue_position: Optional[int] = 0
+    active_slots: int = 0

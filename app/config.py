@@ -8,14 +8,66 @@ STATIC_DIR = BASE_DIR / "static"
 # Ensure downloads directory exists
 DOWNLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
-# Ephemeral File Lifecycle
-CLEANUP_GRACE_SECONDS = int(os.getenv("CLEANUP_GRACE_SECONDS", "300"))      # 5 minutes
-ORPHAN_MAX_AGE_SECONDS = int(os.getenv("ORPHAN_MAX_AGE_SECONDS", "1800"))   # 30 minutes
-CLEANUP_INTERVAL_SECONDS = int(os.getenv("CLEANUP_INTERVAL_SECONDS", "300")) # 5 minutes
+# --- Execution Mode -------------------------------------------------------
+# "desktop" = unlimited, files retained on the user's own machine.
+# "hosted"  = shared cloud VM, guardrails enforced, zero file retention.
+MEDIAGRAB_MODE = os.getenv("MEDIAGRAB_MODE", "desktop").lower()
+IS_HOSTED = MEDIAGRAB_MODE == "hosted"
 
-# Execution constraints
-MAX_CONCURRENT_JOBS = int(os.getenv("MAX_CONCURRENT_JOBS", "3"))
+# When the server sits behind a CDN/reverse proxy, trust forwarded IP headers.
+# Leave disabled when exposed directly, otherwise clients can spoof their IP
+# and defeat the per-IP concurrency gate.
+BEHIND_PROXY = os.getenv("BEHIND_PROXY", "false").lower() == "true"
 
-# Network
+# --- Ephemeral File Lifecycle --------------------------------------------
+# Post-stream grace: the purge countdown starts at the first GET /api/file,
+# not when the job becomes ready, so a file is never yanked off the ready
+# screen while the user is still looking at it.
+CLEANUP_GRACE_SECONDS = int(os.getenv(
+    "CLEANUP_GRACE_SECONDS", "60" if IS_HOSTED else "1800"
+))
+# Orphan watchdog sweeps files nobody ever claimed. Kept well above the grace
+# window so it can never race a ready-screen file the user is about to save.
+ORPHAN_MAX_AGE_SECONDS = int(os.getenv(
+    "ORPHAN_MAX_AGE_SECONDS", "300" if IS_HOSTED else "1800"
+))
+CLEANUP_INTERVAL_SECONDS = int(os.getenv("CLEANUP_INTERVAL_SECONDS", "60" if IS_HOSTED else "300"))
+
+# In-memory job records outlive their files slightly so late /api/file range
+# requests still resolve to a clean 404 rather than a 500.
+JOB_TTL_SECONDS = int(os.getenv("JOB_TTL_SECONDS", "900" if IS_HOSTED else "1800"))
+
+# --- Execution constraints ------------------------------------------------
+# 0 means "no cap" (desktop mode is per-user and self-hosted).
+HOSTED_CONCURRENCY = int(os.getenv("HOSTED_CONCURRENCY", "3"))
+HOSTED_PER_IP_CONCURRENCY = int(os.getenv("HOSTED_PER_IP_CONCURRENCY", "1"))
+
+MAX_CONCURRENT_JOBS = int(os.getenv("MAX_CONCURRENT_JOBS", "0" if not IS_HOSTED else str(HOSTED_CONCURRENCY)))
+PER_IP_CONCURRENCY = int(os.getenv(
+    "PER_IP_CONCURRENCY", "0" if not IS_HOSTED else str(HOSTED_PER_IP_CONCURRENCY)
+))
+
+# --- Hosted guardrails ----------------------------------------------------
+HOSTED_MAX_RESOLUTION = os.getenv("HOSTED_MAX_RESOLUTION", "1080p")
+HOSTED_MAX_DURATION_SECONDS = int(os.getenv("HOSTED_MAX_DURATION_SECONDS", "3600"))
+HOSTED_MAX_FILE_SIZE_BYTES = int(os.getenv(
+    "HOSTED_MAX_FILE_SIZE_BYTES", str(1 * 1024 * 1024 * 1024)
+))
+HOSTED_MAX_FILESIZE_ARG = os.getenv("HOSTED_MAX_FILESIZE_ARG", "1024m")
+
+# Resolutions locked to the native apps in hosted mode.
+HOSTED_LOCKED_RESOLUTIONS = ["1440p", "2160p"]
+
+# Short-lived cache so /api/download can re-use the /api/info probe instead of
+# paying a second yt-dlp extraction on every request.
+METADATA_CACHE_TTL_SECONDS = int(os.getenv("METADATA_CACHE_TTL_SECONDS", "300"))
+METADATA_CACHE_MAX_ENTRIES = int(os.getenv("METADATA_CACHE_MAX_ENTRIES", "128"))
+
+# --- Distribution ---------------------------------------------------------
+GITHUB_RELEASES_URL = os.getenv(
+    "GITHUB_RELEASES_URL", "https://github.com/ZenDevvv/MediaGrab/releases/latest"
+)
+
+# --- Network --------------------------------------------------------------
 HOST = os.getenv("HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", "8000"))
