@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks, Query, Request
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Query, Request, Response
 from fastapi.responses import StreamingResponse, FileResponse
 
 from app import config
@@ -23,8 +23,13 @@ from app.services.jobs import job_manager
 from app.services.downloader import execute_download
 from app.services.cleaner import deferred_file_removal
 from app.services.metadata import GuardrailError, get_cached_metadata, load_and_validate
-from app.services.network import get_client_ip
-from app.services.scheduler import PER_IP_LIMIT_MESSAGE, PerIPLimitExceeded, scheduler
+from app.services.network import (
+    Identity,
+    issue_session_token,
+    resolve_identity,
+    session_key,
+)
+from app.services.scheduler import GateExceeded, scheduler
 
 router = APIRouter(prefix="/api")
 
@@ -50,6 +55,7 @@ async def api_capabilities():
         # scheduler values, so this always describes the active policy.
         concurrency_limit=(config.MAX_CONCURRENT_JOBS if not hosted else config.HOSTED_CONCURRENCY) or None,
         per_ip_limit=(config.PER_IP_CONCURRENCY if not hosted else config.HOSTED_PER_IP_CONCURRENCY) or None,
+        per_session_limit=(config.PER_SESSION_CONCURRENCY if not hosted else config.HOSTED_PER_SESSION_CONCURRENCY) or None,
         idle_watchdog_seconds=ORPHAN_MAX_AGE_SECONDS,
         locked_resolutions=list(config.HOSTED_LOCKED_RESOLUTIONS) if hosted else [],
     )
@@ -77,15 +83,40 @@ async def api_info(req: InfoRequest, request: Request):
 
 
 @router.post("/download", response_model=DownloadResponse, status_code=202)
-async def api_download(req: DownloadRequest, request: Request):
-    client_ip = get_client_ip(request)
+async def api_download(req: DownloadRequest, request: Request, response: Response):
+    identity = resolve_identity(request)
 
-    # Reject over-quota clients before we allocate anything, so a repeat
-    # attempt cannot consume a slot or leave a job record behind.
+    # Mint a session on first contact so subsequent requests are gated by
+    # session rather than IP. Issued only in hosted mode; desktop is per-user
+    # and uncapped, so a cookie would be pointless state.
+    #
+    # The freshly-minted token gates THIS request too: the client will hold it
+    # on its next call, so gating on anything else would hand every new client an
+    # ungated first download. The IP ceiling still bounds a cookie-dropping
+    # client.
+    gate_session = identity.session_id
+    if config.IS_HOSTED and not identity.is_session_backed:
+        minted = issue_session_token()
+        # Gate on the same key a follow-up cookie will verify to, never on the
+        # signed envelope -- otherwise the first and second requests occupy
+        # different gate entries and the session gate never engages.
+        gate_session = session_key(minted)
+        response.set_cookie(
+            config.SESSION_COOKIE_NAME,
+            minted,
+            max_age=config.SESSION_COOKIE_MAX_AGE,
+            httponly=True,
+            samesite="lax",
+            secure=request.url.scheme == "https",
+            path="/",
+        )
+
+    # Reject over-quota callers before allocating anything, so a repeat attempt
+    # cannot consume a slot or leave a job record behind.
     try:
-        await scheduler.check_per_ip(client_ip)
-    except PerIPLimitExceeded:
-        raise HTTPException(status_code=429, detail=PER_IP_LIMIT_MESSAGE)
+        await scheduler.check_gates(identity.session_id, identity.client_ip)
+    except GateExceeded as gate:
+        raise HTTPException(status_code=429, detail=gate.detail)
 
     # Guardrails run against server-side metadata, never client-supplied values.
     try:
@@ -100,11 +131,12 @@ async def api_download(req: DownloadRequest, request: Request):
     job = job_manager.create_job(req)
 
     try:
-        queue_position, waiter = await scheduler.acquire(job.id, client_ip)
-    except PerIPLimitExceeded:
-        # Lost a race with a concurrent request from the same IP.
-        job_manager.update_job(job.id, status="error", error=PER_IP_LIMIT_MESSAGE)
-        raise HTTPException(status_code=429, detail=PER_IP_LIMIT_MESSAGE)
+        queue_position, waiter = await scheduler.acquire(
+            job.id, gate_session, identity.client_ip
+        )
+    except GateExceeded as gate:
+        job_manager.update_job(job.id, status="error", error=gate.detail)
+        raise HTTPException(status_code=429, detail=gate.detail)
 
     if queue_position == 0:
         job_manager.update_job(job.id, status="queued", active_slots=scheduler.active_slots)
@@ -118,12 +150,12 @@ async def api_download(req: DownloadRequest, request: Request):
                   f"Waiting in queue (Position {queue_position})...",
         )
 
-    asyncio.create_task(_run_job(job.id, req, client_ip, waiter))
+    asyncio.create_task(_run_job(job.id, req, gate_session, identity.client_ip, waiter))
 
     return DownloadResponse(job_id=job.id)
 
 
-async def _run_job(job_id: str, req: DownloadRequest, client_ip, waiter):
+async def _run_job(job_id: str, req: DownloadRequest, session_id, client_ip, waiter):
     """Drive a download, holding its scheduler slot for the whole run.
 
     A queued job awaits its waiter first; an immediately-granted one skips
@@ -132,7 +164,7 @@ async def _run_job(job_id: str, req: DownloadRequest, client_ip, waiter):
     """
     try:
         if waiter is not None:
-            await scheduler.wait_for_slot(waiter, job_id, client_ip)
+            await scheduler.wait_for_slot(waiter, job_id, session_id, client_ip)
             job_manager.update_job(
                 job_id,
                 queue_position=0,
@@ -142,10 +174,10 @@ async def _run_job(job_id: str, req: DownloadRequest, client_ip, waiter):
             )
         await execute_download(job_id, req)
     except asyncio.CancelledError:
-        job_manager.update_job(job_id, status="error", error=PER_IP_LIMIT_MESSAGE)
+        job_manager.update_job(job_id, status="error", error="Download was cancelled.")
     finally:
         job_manager.update_job(job_id, active_slots=scheduler.active_slots)
-        await scheduler.release(job_id, client_ip)
+        await scheduler.release(job_id, session_id, client_ip)
         if waiter is not None and not waiter.done():
             waiter.cancel()
 

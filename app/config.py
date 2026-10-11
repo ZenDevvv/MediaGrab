@@ -40,12 +40,31 @@ JOB_TTL_SECONDS = int(os.getenv("JOB_TTL_SECONDS", "900" if IS_HOSTED else "1800
 # --- Execution constraints ------------------------------------------------
 # 0 means "no cap" (desktop mode is per-user and self-hosted).
 HOSTED_CONCURRENCY = int(os.getenv("HOSTED_CONCURRENCY", "3"))
-HOSTED_PER_IP_CONCURRENCY = int(os.getenv("HOSTED_PER_IP_CONCURRENCY", "1"))
+# Primary gate: what a user actually experiences. Keyed to a session cookie when
+# present so unrelated users behind one CGNAT NAT do not block each other.
+HOSTED_PER_SESSION_CONCURRENCY = int(os.getenv("HOSTED_PER_SESSION_CONCURRENCY", "1"))
+# Secondary ceiling, applied independently. Without it, dropping the cookie
+# would reset the session gate and let one client monopolize the pool.
+HOSTED_PER_IP_CONCURRENCY = int(os.getenv("HOSTED_PER_IP_CONCURRENCY", "3"))
 
 MAX_CONCURRENT_JOBS = int(os.getenv("MAX_CONCURRENT_JOBS", "0" if not IS_HOSTED else str(HOSTED_CONCURRENCY)))
 PER_IP_CONCURRENCY = int(os.getenv(
     "PER_IP_CONCURRENCY", "0" if not IS_HOSTED else str(HOSTED_PER_IP_CONCURRENCY)
 ))
+PER_SESSION_CONCURRENCY = int(os.getenv(
+    "PER_SESSION_CONCURRENCY", "0" if not IS_HOSTED else str(HOSTED_PER_SESSION_CONCURRENCY)
+))
+
+# --- Sessions (§1.1 Decision #2) ------------------------------------------
+# A fairness device for the concurrency gate, NOT authentication: the token is an
+# opaque random ID carrying no user identity, PII, or cross-session linkage.
+# Signed with HMAC-SHA256 so a client cannot forge a session to shed its
+# history. If SESSION_SECRET is unset, one is generated per process -- sessions
+# then reset on restart, which is acceptable for fairness purposes.
+SESSION_COOKIE_NAME = os.getenv("SESSION_COOKIE_NAME", "mg_session")
+SESSION_COOKIE_MAX_AGE = int(os.getenv("SESSION_COOKIE_MAX_AGE", str(24 * 60 * 60)))
+SESSION_SECRET = os.getenv("SESSION_SECRET") or None
+SESSION_SECRET_IS_EPHEMERAL = SESSION_SECRET is None
 
 # --- Hosted guardrails ----------------------------------------------------
 HOSTED_MAX_RESOLUTION = os.getenv("HOSTED_MAX_RESOLUTION", "1080p")

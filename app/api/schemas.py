@@ -50,6 +50,7 @@ class LimitsResponse(BaseModel):
     max_file_size_bytes: Optional[int] = None
     concurrency_limit: Optional[int] = None
     per_ip_limit: Optional[int] = None
+    per_session_limit: Optional[int] = None
     idle_watchdog_seconds: Optional[int] = None
     locked_resolutions: List[str] = Field(default_factory=list)
 

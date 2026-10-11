@@ -30,8 +30,7 @@
     eventSource: null,
     pollTimer: null,
     deletionTimer: null,
-    capabilities: null,
-    capabilitiesLoaded: false
+    capabilities: null
   };
 
   // --- Capabilities (§1.2 Decision #9) ---
@@ -129,8 +128,6 @@
         downloads: (AppState.capabilities && AppState.capabilities.downloads) || {}
       };
       console.warn('MediaGrab: capabilities unavailable, using conservative defaults.', e);
-    } finally {
-      AppState.capabilitiesLoaded = true;
     }
     return AppState.capabilities;
   }

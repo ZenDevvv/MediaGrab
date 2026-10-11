@@ -17,7 +17,7 @@ The following architectural decisions were formally evaluated and confirmed duri
 | # | Architecture Dimension | Selected Strategy | Technical Rationale |
 |---|---|---|---|
 | **1** | **Android API Bridging** | **Embedded Ktor Micro-Server in Kotlin (`127.0.0.1:0`)** | Preserves 100% unified `/api/` fetch and SSE contracts in `app.js` across Web, Desktop, and Android without branching frontend logic. |
-| **2** | **Per-IP Rate Limiting** | **HTTP 429 Too Many Requests — session-first identity (Revised, see §1.1)** | Immediately rejects duplicate concurrent download attempts with an upgrade prompt. Identity resolves to a signed session cookie when present, falling back to IP, so users behind a shared CGNAT NAT no longer block each other. |
+| **2** | **Session-First Rate Limiting** | **HTTP 429 — session gate (1) + IP ceiling (3) [Implemented]** | Immediately rejects duplicate concurrent download attempts with an upgrade prompt. Identity resolves to a signed session cookie when present, falling back to IP, so users behind a shared CGNAT NAT no longer block each other. |
 | **3** | **Zero-Retention Lifecycle** | **60-Second Post-Retrieval Grace Window** | Protects against browser range requests (`Range: bytes=0-0`), multi-part downloads, and stream reconnects before unlinking. The clock starts at the first `GET /api/file`, not at job completion, so a file on the ready screen is never swept early. Orphan watchdog is 300s. |
 | **4** | **Desktop Save Paradigm** | **Direct to `~/Downloads` + App-Mode Fallback** | Local app writes directly to `~/Downloads` with *"Saved to Downloads"* UI. If WebKitGTK is missing on Linux, falls back to Chrome/Chromium `--app` mode. |
 | **5** | **CI/CD & Toolchain Strategy** | **GitHub Actions Cloud Builds for Android & Windows** | Android APK (`arm64-v8a`) and Windows `.exe` are compiled on GitHub Actions runners. Local Linux development verified with Python and `uv`. |
@@ -26,12 +26,19 @@ The following architectural decisions were formally evaluated and confirmed duri
 
 ### 1.1 Amendments (Milestone 1 Review)
 
-**Decision #2 revised — session-first identity resolution.** The original per-IP-only design was correct in intent but produced unacceptable real-world behavior: consumer and enterprise carriers place many subscribers behind a single CGNAT NAT address, so two unrelated users on the same egress IP would permanently 429 each other even with all 3 slots idle. Resolution now runs:
+**Decision #2 revised — session-first identity resolution. [IMPLEMENTED]** The original per-IP-only design was correct in intent but produced unacceptable real-world behavior: consumer and enterprise carriers place many subscribers behind a single CGNAT NAT address, so two unrelated users on the same egress IP would permanently 429 each other even with all 3 slots idle. Resolution now runs:
 
-1. If a valid, signed session cookie is present → use the session ID as the identity key.
-2. Otherwise → fall back to the resolved client IP.
+1. If a valid, HMAC-signed session cookie is present → use the session ID as the identity key.
+2. Otherwise → mint a session and fall back to IP for this request.
 
-The IP remains a **secondary** constraint so a client cannot trivially bypass the gate by simply dropping cookies: the per-IP limit applies independently and is set to the global concurrency limit, meaning one IP can never occupy more than all 3 slots. The cookie is a fairness mechanism, not an authentication mechanism — it carries no user identity, is server-issued, `HttpOnly` + `SameSite=Lax`, and is only used to disambiguate concurrent-download fairness.
+The IP remains a **secondary** constraint so a client cannot trivially bypass the gate by simply dropping cookies: the per-IP ceiling applies independently and is set to the global concurrency limit, meaning one IP can never occupy more than all 3 slots. The cookie is a fairness mechanism, not an authentication mechanism — it carries no user identity, is server-issued, `HttpOnly` + `SameSite=Lax`, and is only used to disambiguate concurrent-download fairness.
+
+Implementation notes:
+- Tokens are `<random-id>.<HMAC-SHA256>`; signatures are compared with `hmac.compare_digest` so a valid signature cannot be recovered by timing. A forged or malformed cookie is discarded and a new session issued.
+- The gate key is always the **id half**, never the signed envelope. Mixing the two forms splits one client's occupancy across two gate entries and silently disables the session gate — this was a real defect caught during testing.
+- The freshly-minted token gates the *first* request too, otherwise every new client would receive one ungated download before the cookie existed.
+- `SESSION_SECRET` is HMAC-keyed. When unset, a per-process key is generated and a warning is logged; sessions then reset on restart, which is acceptable for a fairness device and preferable to a hardcoded key.
+- Desktop mode issues no cookie: it is per-user and uncapped, so a cookie would be pointless state.
 
 **Decision #7 added — Android size budget corrected.** The ~42 MB figure was not achievable. The `youtubedl-android:library` AAR is 56.5 MB and the FFmpeg AAR adds further weight; only `arm64-v8a` is shipped, and native libraries install uncompressed to disk. Budget **90–120 MB APK, ~250–350 MB installed**. Release notes and the store listing must state this honestly rather than promising a 42 MB download.
 
@@ -307,7 +314,7 @@ flowchart LR
 ### Milestone 1: Dual-Mode Backend Core & Guardrails (`app/`)
 1. Implement `MEDIAGRAB_MODE`, `BEHIND_PROXY`, and hosted limit constants in `app/config.py`.
 2. Implement real IP extraction helper in `app/services/network.py`.
-3. Implement **session-first identity resolution**: HMAC-signed opaque session cookie, session gate (1) + independent IP ceiling (3), both always enforced (§1.1).
+3. ~~Implement session-first identity resolution~~ **[DONE]** HMAC-signed opaque session cookie, session gate (1) + independent IP ceiling (3), both always enforced (§1.1).
 4. Add `GET /api/capabilities` returning mode, limits, retention, and release URLs.
 5. Implement 3-slot FIFO Semaphore with the dual session/IP gate (HTTP 429, gate-distinguishing detail messages).
 6. Implement server-side metadata cache and clip-aware duration validator ($\le 60\text{m}$ trimmed segment allowed; SRT exempt).

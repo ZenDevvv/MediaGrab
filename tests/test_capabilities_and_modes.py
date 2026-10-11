@@ -15,7 +15,15 @@ from app.services import network as network_mod
 from app.services.cleaner import purge_orphan_files
 from app.services.jobs import JobManager
 from app.services.metadata import GuardrailError, estimate_size_bytes, resolve_duration, validate_request
-from app.services.scheduler import DownloadScheduler, PER_IP_LIMIT_MESSAGE, PerIPLimitExceeded
+from app.services.network import issue_session_token, verify_session_token
+from app.services.scheduler import (
+    GateExceeded,
+    PER_IP_LIMIT_MESSAGE,
+    PER_SESSION_LIMIT_MESSAGE,
+    DownloadScheduler,
+    PerIPLimitExceeded,
+    PerSessionLimitExceeded,
+)
 
 GB = 1024 ** 3
 
@@ -106,7 +114,8 @@ async def test_capabilities_hosted_mode_advertises_limits(monkeypatch, hosted):
     assert body["limits"]["max_duration_seconds"] == 3600
     assert body["limits"]["max_file_size_bytes"] == GB
     assert body["limits"]["concurrency_limit"] == 3
-    assert body["limits"]["per_ip_limit"] == 1
+    assert body["limits"]["per_session_limit"] == 1
+    assert body["limits"]["per_ip_limit"] == 3
     assert "2160p" in body["limits"]["locked_resolutions"]
 
 
@@ -335,10 +344,10 @@ def test_metadata_cache_is_bounded():
 
 @pytest.mark.asyncio
 async def test_slots_are_granted_up_to_the_limit():
-    sched = DownloadScheduler(concurrency=3, per_ip_limit=0)
+    sched = DownloadScheduler(concurrency=3, per_session_limit=0, per_ip_limit=0)
     results = []
     for i in range(5):
-        pos, waiter = await sched.acquire(f"job{i}", f"10.0.0.{i}")
+        pos, waiter = await sched.acquire(f"job{i}", None, f"10.0.0.{i}")
         results.append((pos, waiter))
     assert results[0][0] == 0 and results[1][0] == 0 and results[2][0] == 0
     assert results[3][0] == 1 and results[4][0] == 2
@@ -348,169 +357,281 @@ async def test_slots_are_granted_up_to_the_limit():
 
 @pytest.mark.asyncio
 async def test_released_slot_goes_to_first_waiter():
-    sched = DownloadScheduler(concurrency=1, per_ip_limit=0)
-    _, _ = await sched.acquire("job0", "10.0.0.1")
-    pos1, waiter1 = await sched.acquire("job1", "10.0.0.2")
-    pos2, waiter2 = await sched.acquire("job2", "10.0.0.3")
+    sched = DownloadScheduler(concurrency=1, per_session_limit=0, per_ip_limit=0)
+    await sched.acquire("job0", None, "10.0.0.1")
+    pos1, waiter1 = await sched.acquire("job1", None, "10.0.0.2")
+    pos2, waiter2 = await sched.acquire("job2", None, "10.0.0.3")
     assert (pos1, pos2) == (1, 2)
 
-    await sched.release("job0", "10.0.0.1")
+    await sched.release("job0", None, "10.0.0.1")
     await asyncio.wait_for(waiter1, timeout=1)
     assert waiter1.done() and not waiter2.done()
 
-    await sched.release("job1", "10.0.0.2")
+    await sched.release("job1", None, "10.0.0.2")
     await asyncio.wait_for(waiter2, timeout=1)
     assert waiter2.done()
 
 
 @pytest.mark.asyncio
-async def test_per_ip_limit_rejects_second_concurrent_job():
-    sched = DownloadScheduler(concurrency=3, per_ip_limit=1)
-    pos, _ = await sched.acquire("job0", "203.0.113.9")
-    assert pos == 0
-    with pytest.raises(PerIPLimitExceeded) as exc:
-        await sched.acquire("job1", "203.0.113.9")
-    assert str(exc.value) == PER_IP_LIMIT_MESSAGE
-
-
-@pytest.mark.asyncio
-async def test_per_ip_limit_allows_different_ips():
-    sched = DownloadScheduler(concurrency=3, per_ip_limit=1)
-    for i in range(3):
-        pos, _ = await sched.acquire(f"job{i}", f"10.0.0.{i}")
-        assert pos == 0
-
-
-@pytest.mark.asyncio
-async def test_per_ip_slot_is_freed_on_release():
-    sched = DownloadScheduler(concurrency=3, per_ip_limit=1)
-    await sched.acquire("job0", "198.51.100.7")
-    await sched.release("job0", "198.51.100.7")
-    assert sched.active_for_ip("198.51.100.7") == 0
-    # Now permitted again.
-    pos, _ = await sched.acquire("job1", "198.51.100.7")
-    assert pos == 0
-
-
-@pytest.mark.asyncio
 async def test_zero_limits_mean_unlimited():
-    sched = DownloadScheduler(concurrency=0, per_ip_limit=0)
+    sched = DownloadScheduler(concurrency=0, per_session_limit=0, per_ip_limit=0)
     for i in range(25):
-        pos, _ = await sched.acquire(f"job{i}", f"10.0.0.{i}")
+        pos, _ = await sched.acquire(f"job{i}", None, f"10.0.0.{i}")
         assert pos == 0
 
 
 @pytest.mark.asyncio
 async def test_cancelled_waiter_leaves_the_queue():
-    sched = DownloadScheduler(concurrency=1, per_ip_limit=0)
-    await sched.acquire("job0", "10.0.0.1")
-    _, waiter = await sched.acquire("job1", "10.0.0.2")
+    sched = DownloadScheduler(concurrency=1, per_session_limit=0, per_ip_limit=0)
+    await sched.acquire("job0", None, "10.0.0.1")
+    _, waiter = await sched.acquire("job1", None, "10.0.0.2")
     await sched.cancel_waiting("job1")
     assert sched.waiting_count == 0
     assert waiter.cancelled()
 
 
-# --- HTTP: 429 rate limiting ---------------------------------------------
+# --- Session gate and IP ceiling (§1.1 Decision #2) -----------------------
 
 @pytest.mark.asyncio
-async def test_duplicate_ip_download_returns_429(monkeypatch, behind_proxy, hosted_srt):
+async def test_session_gate_rejects_second_job_from_same_session():
+    sched = DownloadScheduler(concurrency=3, per_session_limit=1, per_ip_limit=3)
+    pos, _ = await sched.acquire("job0", "sess-a", "10.0.0.1")
+    assert pos == 0
+    with pytest.raises(PerSessionLimitExceeded) as exc:
+        await sched.acquire("job1", "sess-a", "10.0.0.1")
+    assert str(exc.value) == PER_SESSION_LIMIT_MESSAGE
+    assert exc.value.gate == "session"
+
+
+@pytest.mark.asyncio
+async def test_two_sessions_behind_one_nat_are_both_allowed():
+    """The CGNAT case: unrelated users sharing an egress IP must not collide."""
+    sched = DownloadScheduler(concurrency=3, per_session_limit=1, per_ip_limit=3)
+    shared_ip = "203.0.113.77"
+    pos_a, _ = await sched.acquire("job-a", "sess-a", shared_ip)
+    pos_b, _ = await sched.acquire("job-b", "sess-b", shared_ip)
+    assert pos_a == 0 and pos_b == 0
+    assert sched.active_slots == 2
+
+
+@pytest.mark.asyncio
+async def test_ip_ceiling_stops_cookie_dropping():
+    """Dropping the cookie must not let one client exceed the IP ceiling."""
+    sched = DownloadScheduler(concurrency=3, per_session_limit=1, per_ip_limit=2)
+    shared_ip = "203.0.113.88"
+    await sched.acquire("job0", "sess-a", shared_ip)
+    await sched.acquire("job1", "sess-b", shared_ip)
+    # A third "new session" on the same IP is refused by the ceiling.
+    with pytest.raises(PerIPLimitExceeded) as exc:
+        await sched.acquire("job2", "sess-c", shared_ip)
+    assert str(exc.value) == PER_IP_LIMIT_MESSAGE
+    assert exc.value.gate == "ip"
+
+
+@pytest.mark.asyncio
+async def test_session_gate_never_exceeds_ip_ceiling():
+    sched = DownloadScheduler(concurrency=3, per_session_limit=1, per_ip_limit=3)
+    for i in range(3):
+        await sched.acquire(f"job{i}", f"sess-{i}", "10.0.0.5")
+    with pytest.raises(GateExceeded):
+        await sched.acquire("job3", "sess-9", "10.0.0.5")
+
+
+@pytest.mark.asyncio
+async def test_session_slot_freed_on_release():
+    sched = DownloadScheduler(concurrency=3, per_session_limit=1, per_ip_limit=3)
+    await sched.acquire("job0", "sess-x", "10.0.0.1")
+    assert sched.active_for_session("sess-x") == 1
+    await sched.release("job0", "sess-x", "10.0.0.1")
+    assert sched.active_for_session("sess-x") == 0
+    assert sched.active_for_ip("10.0.0.1") == 0
+    pos, _ = await sched.acquire("job1", "sess-x", "10.0.0.1")
+    assert pos == 0
+
+
+@pytest.mark.asyncio
+async def test_check_gates_reports_without_allocating():
+    sched = DownloadScheduler(concurrency=3, per_session_limit=1, per_ip_limit=3)
+    await sched.acquire("job0", "sess-a", "10.0.0.1")
+    with pytest.raises(PerSessionLimitExceeded):
+        await sched.check_gates("sess-a", "10.0.0.9")
+    # Nothing was reserved by the failed check.
+    assert sched.active_slots == 1
+
+
+@pytest.mark.asyncio
+async def test_aborting_a_queued_job_releases_its_gate_slot():
+    """An aborted queued job must not keep occupying its session allowance."""
+    sched = DownloadScheduler(concurrency=1, per_session_limit=1, per_ip_limit=3)
+    await sched.acquire("job0", "sess-a", "10.0.0.1")
+    _, waiter = await sched.acquire("job1", "sess-b", "10.0.0.2")
+    await sched.cancel_waiting("job1")
+    assert sched.active_for_session("sess-b") == 0
+    assert sched.active_for_ip("10.0.0.2") == 0
+
+
+@pytest.fixture
+def hold_jobs(monkeypatch):
+    """Keep background download jobs in-flight so gate state is deterministic.
+
+    Without this, a job whose URL fails fast releases its slot before the next
+    request arrives, and the gate tests race the worker.
+    """
     from app.api import routes as routes_mod
 
-    sched = DownloadScheduler(concurrency=3, per_ip_limit=1)
+    release = asyncio.Event()
+
+    async def fake_execute(job_id, request):
+        await release.wait()
+
+    monkeypatch.setattr(routes_mod, "execute_download", fake_execute)
+    yield release
+    release.set()
+
+
+# --- HTTP: 429 rate limiting and sessions ---------------------------------
+
+@pytest.mark.asyncio
+async def test_hosted_mints_a_session_cookie_on_first_download(monkeypatch, hosted_srt, hold_jobs):
+    from app.api import routes as routes_mod
+
+    sched = DownloadScheduler(3, 1, 3)
     monkeypatch.setattr(routes_mod, "scheduler", sched)
 
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post(
+            "/api/download",
+            json={"url": "https://example.com/a", "mode": "srt"},
+            headers={"X-Forwarded-For": "203.0.113.5"},
+        )
+        assert resp.status_code == 202
+        # HttpOnly keeps it out of JS; SameSite=Lax blocks cross-site use.
+        set_cookie = resp.headers.get("set-cookie", "")
+        assert config.SESSION_COOKIE_NAME in set_cookie
+        assert "HttpOnly" in set_cookie
+        assert "SameSite=lax" in set_cookie.replace("samesite", "SameSite")
+        # httpx persists it, so the next call is session-backed.
+        assert any(c.name == config.SESSION_COOKIE_NAME for c in client.cookies.jar)
+    await sched.reset()
+
+
+@pytest.mark.asyncio
+async def test_same_session_second_download_returns_429(monkeypatch, behind_proxy, hosted_srt, hold_jobs):
+    from app.api import routes as routes_mod
+
+    sched = DownloadScheduler(3, 1, 3)
+    monkeypatch.setattr(routes_mod, "scheduler", sched)
+
+    headers = {"X-Forwarded-For": "203.0.113.55"}
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         first = await client.post(
             "/api/download",
             json={"url": "https://example.com/a", "mode": "srt"},
-            headers={"X-Forwarded-For": "203.0.113.55"},
+            headers=headers,
         )
         assert first.status_code == 202
-        job_id = first.json()["job_id"]
 
         second = await client.post(
             "/api/download",
             json={"url": "https://example.com/b", "mode": "srt"},
-            headers={"X-Forwarded-For": "203.0.113.55"},
+            headers=headers,
         )
         assert second.status_code == 429
-        assert second.json()["detail"] == PER_IP_LIMIT_MESSAGE
-
-    # Abort to release the slot for other tests.
-    await sched.cancel_waiting(job_id)
-    await sched.release(job_id, None)
-
-
-@pytest.mark.asyncio
-async def test_hosted_duplicate_ip_returns_429_over_http(monkeypatch, behind_proxy, hosted_srt):
-    """The rate limit must hold in hosted mode, where it actually applies."""
-    from app.api import routes as routes_mod
-
-    sched = DownloadScheduler(concurrency=3, per_ip_limit=1)
-    monkeypatch.setattr(routes_mod, "scheduler", sched)
-
-    transport = ASGITransport(app=app)
-    async with AsyncClient(transport=transport, base_url="http://test") as client:
-        first = await client.post(
-            "/api/download",
-            json={"url": "https://example.com/first", "mode": "srt"},
-            headers={"X-Forwarded-For": "203.0.113.10"},
-        )
-        assert first.status_code == 202
-
-        second = await client.post(
-            "/api/download",
-            json={"url": "https://example.com/second", "mode": "srt"},
-            headers={"X-Forwarded-For": "203.0.113.10"},
-        )
-        assert second.status_code == 429
-        assert second.json()["detail"] == PER_IP_LIMIT_MESSAGE
-
-        # A different IP is unaffected by the first client's occupancy.
-        third = await client.post(
-            "/api/download",
-            json={"url": "https://example.com/third", "mode": "srt"},
-            headers={"X-Forwarded-For": "203.0.113.11"},
-        )
-        assert third.status_code == 202
-
+        assert second.json()["detail"] == PER_SESSION_LIMIT_MESSAGE
     await sched.reset()
 
 
 @pytest.mark.asyncio
-async def test_uncapped_scheduler_never_queues():
-    """Desktop mode ships a scheduler with both caps at 0 (unlimited).
+async def test_two_sessions_behind_one_ip_are_both_accepted_over_http(
+    monkeypatch, behind_proxy, hosted_srt
+, hold_jobs):
+    """Regression: users sharing a CGNAT NAT must not 429 each other."""
+    from app.api import routes as routes_mod
 
-    Limits are resolved at import time, so this asserts the desktop default is
-    genuinely uncapped rather than relying on the ambient run mode.
-    """
-    from app.services.scheduler import DownloadScheduler
+    sched = DownloadScheduler(3, 1, 3)
+    monkeypatch.setattr(routes_mod, "scheduler", sched)
 
-    uncapped = DownloadScheduler(concurrency=0, per_ip_limit=0)
-    assert uncapped.is_limited() is False
-    for i in range(50):
-        pos, waiter = await uncapped.acquire(f"desktop-job-{i}", f"10.0.0.{i}")
-        assert pos == 0 and waiter is None
-    await uncapped.reset()
+    shared_ip = {"X-Forwarded-For": "203.0.113.99"}
+    transport = ASGITransport(app=app)
+
+    async with AsyncClient(transport=transport, base_url="http://test") as alice:
+        r1 = await alice.post("/api/download", json={"url": "https://example.com/1", "mode": "srt"}, headers=shared_ip)
+        assert r1.status_code == 202
+
+    # A separate client (separate cookie jar) is a separate session.
+    async with AsyncClient(transport=transport, base_url="http://test") as bob:
+        r2 = await bob.post("/api/download", json={"url": "https://example.com/2", "mode": "srt"}, headers=shared_ip)
+        assert r2.status_code == 202
+    await sched.reset()
 
 
 @pytest.mark.asyncio
-async def test_distinct_ips_are_not_rate_limited(monkeypatch, behind_proxy, hosted_srt):
+async def test_ip_ceiling_over_http(monkeypatch, behind_proxy, hosted_srt, hold_jobs):
+    """Fresh sessions from one IP still hit the ceiling."""
     from app.api import routes as routes_mod
 
-    sched = DownloadScheduler(concurrency=3, per_ip_limit=1)
+    sched = DownloadScheduler(3, 1, 2)
+    monkeypatch.setattr(routes_mod, "scheduler", sched)
+
+    shared_ip = {"X-Forwarded-For": "203.0.113.100"}
+    transport = ASGITransport(app=app)
+    statuses = []
+    for i in range(3):
+        async with AsyncClient(transport=transport, base_url="http://test") as client:
+            resp = await client.post(
+                "/api/download",
+                json={"url": f"https://example.com/{i}", "mode": "srt"},
+                headers=shared_ip,
+            )
+            statuses.append(resp.status_code)
+            if resp.status_code == 429:
+                assert resp.json()["detail"] == PER_IP_LIMIT_MESSAGE
+    assert statuses == [202, 202, 429]
+    await sched.reset()
+
+
+@pytest.mark.asyncio
+async def test_tampered_cookie_is_rejected_and_regenerated(monkeypatch, behind_proxy, hosted_srt, hold_jobs):
+    """A forged signature must not buy a fresh gate."""
+    from app.api import routes as routes_mod
+
+    sched = DownloadScheduler(3, 1, 3)
+    monkeypatch.setattr(routes_mod, "scheduler", sched)
+
+    headers = {"X-Forwarded-For": "203.0.113.60", "Cookie": f"{config.SESSION_COOKIE_NAME}=forged.deadbeef"}
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        resp = await client.post(
+            "/api/download",
+            json={"url": "https://example.com/a", "mode": "srt"},
+            headers=headers,
+        )
+        # Falls back to IP gating rather than trusting the forged identity.
+        assert resp.status_code == 202
+        assert verify_session_token("forged.deadbeef") is None
+    await sched.reset()
+
+
+@pytest.mark.asyncio
+async def test_desktop_mode_issues_no_session_cookie(monkeypatch, behind_proxy, hosted_srt, hold_jobs):
+    """Desktop is per-user and uncapped; a cookie would be pointless state."""
+    from app.api import routes as routes_mod
+
+    monkeypatch.setattr(config, "IS_HOSTED", False)
+    sched = DownloadScheduler(0, 0, 0)
     monkeypatch.setattr(routes_mod, "scheduler", sched)
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        for ip in ("10.0.0.1", "10.0.0.2"):
-            resp = await client.post(
-                "/api/download",
-                json={"url": f"https://example.com/{ip}", "mode": "srt"},
-                headers={"X-Forwarded-For": ip},
-            )
-            assert resp.status_code == 202
+        resp = await client.post(
+            "/api/download",
+            json={"url": "https://example.com/local", "mode": "srt"},
+            headers={"X-Forwarded-For": "203.0.113.70"},
+        )
+        assert resp.status_code == 202
+        assert config.SESSION_COOKIE_NAME not in resp.headers.get("set-cookie", "")
     await sched.reset()
 
 
@@ -521,7 +642,7 @@ async def test_hosted_download_over_duration_is_rejected(monkeypatch):
     from app.api import routes as routes_mod
 
     monkeypatch.setattr(config, "IS_HOSTED", True)
-    monkeypatch.setattr(routes_mod, "scheduler", DownloadScheduler(3, 1))
+    monkeypatch.setattr(routes_mod, "scheduler", DownloadScheduler(3, 1, 3))
 
     async def fake_inspect(url):
         return make_metadata(duration=7200)
@@ -542,7 +663,7 @@ async def test_hosted_download_over_size_is_rejected(monkeypatch):
     from app.api import routes as routes_mod
 
     monkeypatch.setattr(config, "IS_HOSTED", True)
-    monkeypatch.setattr(routes_mod, "scheduler", DownloadScheduler(3, 1))
+    monkeypatch.setattr(routes_mod, "scheduler", DownloadScheduler(3, 1, 3))
 
     big = [QualityOption(resolution="1080p", approx_bytes=int(2 * GB))]
 
@@ -564,7 +685,7 @@ async def test_hosted_download_over_size_is_rejected(monkeypatch):
 async def test_hosted_trimmed_download_is_accepted(monkeypatch):
     from app.api import routes as routes_mod
 
-    sched = DownloadScheduler(3, 1)
+    sched = DownloadScheduler(3, 1, 3)
     monkeypatch.setattr(config, "IS_HOSTED", True)
     monkeypatch.setattr(routes_mod, "scheduler", sched)
 
@@ -592,7 +713,7 @@ async def test_hosted_trimmed_download_is_accepted(monkeypatch):
 async def test_hosted_srt_long_transcript_is_accepted(monkeypatch):
     from app.api import routes as routes_mod
 
-    sched = DownloadScheduler(3, 1)
+    sched = DownloadScheduler(3, 1, 3)
     monkeypatch.setattr(config, "IS_HOSTED", True)
     monkeypatch.setattr(routes_mod, "scheduler", sched)
 
