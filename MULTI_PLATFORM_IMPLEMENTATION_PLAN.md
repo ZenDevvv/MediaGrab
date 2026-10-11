@@ -62,7 +62,19 @@ M2 could not proceed as written: its spec directly contradicted §1.1 Decision #
 
 **Decision #11 — 429 is a first-class UI state.** Post-M1, `429` is a designed outcome carrying a gate-specific message (§4). `app.js` currently collapses every non-OK response into a generic error ("Subtitles unavailable."). The frontend must branch on `429` specifically and surface the server's upgrade prompt verbatim, rather than flattening a conversion opportunity into a dead end.
 
-**Carried-forward observation (not gated, no action required):** the existing ready screen calls `startDeletionCountdown(30 * 60)` and renders *"Deleted from this machine in 29:59."* Both are wrong in hosted mode (wrong duration, wrong referent, wrong start point) and the hardcoded 30-minute figure is also wrong for desktop, where retention is effectively indefinite. Decision #8 replaces this element outright.
+**Carried-forward observation (resolved):** the ready screen used to call `startDeletionCountdown(30 * 60)` and render *"Deleted from this machine in 29:59."* Wrong in hosted mode (duration, referent, start point) and wrong for desktop, where retention is indefinite. Replaced by Decision #8.
+
+### 1.3 Milestone 3 Gate (Desktop Shell)
+
+M3's "save directly to `~/Downloads`" requirement collides with retention code that is already shipped. Resolutions below.
+
+**Decision #12 — retention is disabled in desktop mode.** The cleaner daemon starts unconditionally in the FastAPI lifespan and sweeps `DOWNLOADS_DIR`, unlinking anything older than `ORPHAN_MAX_AGE_SECONDS` (1800s on desktop). Redirecting `DOWNLOADS_DIR` to `~/Downloads` would therefore have **deleted the user's files after ~30 minutes**. Desktop mode now bypasses the cleaner daemon entirely, and the deferred/purge paths become no-ops. Hosted retention is unchanged.
+
+**Decision #13 — user-facing filenames, with numeric dedupe.** The existing output template is `{job_id}_%(title).%(ext)s`, which would surface as `a19bd4ff_Never Gonna Give You Up.mp4` in the user's Downloads folder. Desktop output uses the bare title; on collision yt-dlp appends ` (1)`, ` (2)`, matching browser download behaviour. The job-id prefix remains in hosted mode, where filenames are ephemeral and never seen twice.
+
+**Decision #14 — desktop suppresses the browser save.** With a server-side write, the frontend must not also navigate to `/api/file/{job_id}`, or the file is written twice. Desktop mode branches on the existing `mg-mode` tag: no navigation, and the ready screen shows *"Saved to Downloads"* with an **Open in Folder** action. Hosted keeps its current browser-driven save.
+
+**Verification scope:** the Windows `.exe` cannot be executed from the Linux build host, so M3 is verified on Linux only. The PyInstaller spec and GitHub Actions workflow are delivered unproven; the maintainer has a Windows VM and verifies manually. No claim of Windows correctness is made without that run.
 
 ---
 

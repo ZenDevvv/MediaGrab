@@ -20,7 +20,12 @@ wheels/
 .installed.cfg
 *.egg
 
-# Virtual environments
+# Desktop build artifacts
+ffmpeg/
+_internal/
+MediaGrab.spec.bak
+*.spec.bak
+release/
 .venv/
 env/
 venv/

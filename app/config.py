@@ -2,7 +2,9 @@ from pathlib import Path
 import os
 
 BASE_DIR = Path(__file__).resolve().parent.parent
-DOWNLOADS_DIR = BASE_DIR / "downloads"
+# Desktop builds override this to the user's real Downloads folder via
+# MEDIA_GRAB_DOWNLOADS_DIR (set by run_desktop.py).
+DOWNLOADS_DIR = Path(os.getenv("MEDIA_GRAB_DOWNLOADS_DIR") or (BASE_DIR / "downloads"))
 STATIC_DIR = BASE_DIR / "static"
 
 # Ensure downloads directory exists
@@ -13,6 +15,11 @@ DOWNLOADS_DIR.mkdir(parents=True, exist_ok=True)
 # "hosted"  = shared cloud VM, guardrails enforced, zero file retention.
 MEDIAGRAB_MODE = os.getenv("MEDIAGRAB_MODE", "desktop").lower()
 IS_HOSTED = MEDIAGRAB_MODE == "hosted"
+
+# Deletion is a hosted-only behaviour (§1.3 Decision #12). On desktop the
+# output directory is the user's own Downloads folder, and sweeping it would
+# destroy files the user believes they have kept.
+RETENTION_ENABLED = os.getenv("RETENTION_ENABLED", "false" if not IS_HOSTED else "true").lower() == "true"
 
 # When the server sits behind a CDN/reverse proxy, trust forwarded IP headers.
 # Leave disabled when exposed directly, otherwise clients can spoof their IP
@@ -28,10 +35,18 @@ CLEANUP_GRACE_SECONDS = int(os.getenv(
 ))
 # Orphan watchdog sweeps files nobody ever claimed. Kept well above the grace
 # window so it can never race a ready-screen file the user is about to save.
+# Unused when RETENTION_ENABLED is false.
 ORPHAN_MAX_AGE_SECONDS = int(os.getenv(
     "ORPHAN_MAX_AGE_SECONDS", "300" if IS_HOSTED else "1800"
 ))
 CLEANUP_INTERVAL_SECONDS = int(os.getenv("CLEANUP_INTERVAL_SECONDS", "60" if IS_HOSTED else "300"))
+
+# Desktop writes straight to the user's Downloads folder, so filenames must be
+# user-facing and de-duplicated rather than carrying an internal job id
+# (§1.3 Decision #13).
+USER_FACING_FILENAMES = os.getenv(
+    "USER_FACING_FILENAMES", "false" if IS_HOSTED else "true"
+).lower() == "true"
 
 # In-memory job records outlive their files slightly so late /api/file range
 # requests still resolve to a clean 404 rather than a 500.

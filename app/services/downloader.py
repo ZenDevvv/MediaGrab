@@ -136,12 +136,45 @@ def _handle_ffmpeg_progress(
             stage=stage_disp
         )
 
-def create_ydl_opts(job_id: str, request: DownloadRequest, progress_port: Optional[int] = None) -> Dict[str, Any]:
-    out_template = str(DOWNLOADS_DIR / f"{job_id}_%(title).100B.%(ext)s")
+def create_ydl_opts(
+    job_id: str,
+    request: DownloadRequest,
+    progress_port: Optional[int] = None,
+    produced_files: Optional[list] = None,
+) -> Dict[str, Any]:
+    if produced_files is None:
+        produced_files = []
+    # Desktop writes straight into the user's Downloads folder, so the filename
+    # is user-facing: bare title, de-duplicated on collision. Hosted keeps the
+    # job-id prefix because its files are ephemeral and never seen twice
+    # (§1.3 Decision #13).
+    if config.USER_FACING_FILENAMES:
+        out_template = str(DOWNLOADS_DIR / "%(title).150B%(ext)s")
+        # Direct yt-dlp's scratch files to a per-job staging directory. Without
+        # this, partials land in the user's Downloads folder where they cannot
+        # be told apart from a concurrent job's fragments -- mtime does not
+        # discriminate, because both are written at the same moment (§1.3 #13).
+        staging = config.DOWNLOADS_DIR / f".mediagrab-{job_id}"
+        staging.mkdir(parents=True, exist_ok=True)
+    else:
+        out_template = str(DOWNLOADS_DIR / f"{job_id}_%(title).100B.%(ext)s")
+        staging = None
+
+    # Paths yt-dlp reports as finished, used for discovery and for purging
+    # partials when a job is aborted.
 
     def progress_hook(d: Dict[str, Any]):
         _raise_if_cancelled(job_id)
         status = d.get('status')
+        if status == 'finished':
+            # yt-dlp resolves %(title)s and any collision suffix internally, so
+            # its chosen filepath is the only reliable source of the output
+            # name. Globbing by job id cannot work once the prefix is dropped
+            # for user-facing filenames (§1.3 Decision #13).
+            info = d.get('info_dict') or {}
+            resolved = info.get('filepath') or info.get('_filename')
+            if resolved:
+                produced_files.append(Path(resolved))
         if status == 'downloading':
             downloaded = d.get('downloaded_bytes', 0)
             total = d.get('total_bytes') or d.get('total_bytes_estimate') or 0
@@ -201,6 +234,7 @@ def create_ydl_opts(job_id: str, request: DownloadRequest, progress_port: Option
 
     opts: Dict[str, Any] = {
         'outtmpl': out_template,
+        **({'paths': {'home': str(config.DOWNLOADS_DIR), 'temp': str(staging)}} if staging else {}),
         'quiet': True,
         'no_warnings': True,
         'progress_hooks': [progress_hook],
@@ -294,8 +328,13 @@ def create_ydl_opts(job_id: str, request: DownloadRequest, progress_port: Option
 
     return opts
 
-def _sync_download(job_id: str, request: DownloadRequest, progress_port: Optional[int] = None):
-    opts = create_ydl_opts(job_id, request, progress_port)
+def _sync_download(
+    job_id: str,
+    request: DownloadRequest,
+    progress_port: Optional[int] = None,
+    produced_files: Optional[list] = None,
+):
+    opts = create_ydl_opts(job_id, request, progress_port, produced_files)
     with yt_dlp.YoutubeDL(opts) as ydl:
         ydl.download([request.url])
 
@@ -305,6 +344,15 @@ async def execute_download(job_id: str, request: DownloadRequest):
         s_str = format_seconds(request.trim.start)
         e_str = format_seconds(request.trim.end)
         initial_stage = f"Trimming segment ({s_str} to {e_str})..."
+
+    # Per-job scratch directory (desktop only). Recreated here rather than
+    # captured in create_ydl_opts so purge_partials can reference it directly.
+    staging_dir = (
+        config.DOWNLOADS_DIR / f".mediagrab-{job_id}"
+        if config.USER_FACING_FILENAMES else None
+    )
+    if staging_dir is not None:
+        staging_dir.mkdir(parents=True, exist_ok=True)
 
     job_manager.update_job(job_id, status="extracting", stage=initial_stage)
     loop = asyncio.get_running_loop()
@@ -338,20 +386,65 @@ async def execute_download(job_id: str, request: DownloadRequest):
         server = None
         progress_port = None
 
+    # Paths yt-dlp reports as finished. Shared with the progress hook so abort
+    # and completion both know the real output name (§1.3 Decision #13).
+    produced_files: list = []
+
+    def _cleanup_staging_dir() -> None:
+        """Remove the now-empty per-job scratch directory, if present."""
+        if staging_dir is None or not staging_dir.is_dir():
+            return
+        try:
+            next(staging_dir.iterdir())
+            return  # not empty: something is still in use, leave it alone
+        except StopIteration:
+            pass
+        except OSError:
+            return
+        try:
+            staging_dir.rmdir()
+        except OSError:
+            pass
+
     def purge_partials() -> None:
-        """Remove every artifact this job produced, completed or not."""
-        for leftover in DOWNLOADS_DIR.glob(f"{job_id}_*"):
+        """Remove every artifact this job produced, completed or not.
+
+        On desktop the scratch directory is per-job, so this is exact: it can
+        never touch a concurrent job's files. In hosted mode the job-id prefix
+        provides the same isolation.
+        """
+        candidates = set(produced_files)
+        if staging_dir is not None:
+            if staging_dir.is_dir():
+                for leftover in staging_dir.iterdir():
+                    candidates.add(leftover)
+        else:
+            candidates.update(config.DOWNLOADS_DIR.glob(f"{job_id}_*"))
+
+        for leftover in candidates:
             try:
-                leftover.unlink()
+                if leftover.is_file():
+                    leftover.unlink()
+            except OSError:
+                pass
+        if staging_dir is not None:
+            try:
+                if staging_dir.is_dir():
+                    staging_dir.rmdir()
             except OSError:
                 pass
 
     try:
-        await loop.run_in_executor(None, _sync_download, job_id, request, progress_port)
+        await loop.run_in_executor(
+            None, _sync_download, job_id, request, progress_port, produced_files
+        )
         _raise_if_cancelled(job_id)
 
-        # Locate completed files
-        matching_files = list(DOWNLOADS_DIR.glob(f"{job_id}_*"))
+        # Locate completed files. Prefer what yt-dlp reported; fall back to a glob
+        # only in hosted mode, where the job-id prefix is guaranteed.
+        matching_files = [p for p in produced_files if p.exists()]
+        if not config.USER_FACING_FILENAMES:
+            matching_files = list(DOWNLOADS_DIR.glob(f"{job_id}_*"))
         if not matching_files:
             raise FileNotFoundError("Output media file was not created.")
 
@@ -374,15 +467,15 @@ async def execute_download(job_id: str, request: DownloadRequest):
         file_stat = primary_file.stat()
         size_str = format_size(file_stat.st_size)
 
-        # Clean display filename (strip internal job_id prefix)
+        # Clean display filename (strip the internal job_id prefix, hosted only)
         display_name = primary_file.name
-        if display_name.startswith(f"{job_id}_"):
+        if not config.USER_FACING_FILENAMES and display_name.startswith(f"{job_id}_"):
             display_name = display_name[len(job_id) + 1:]
 
         srt_display_name = None
         if srt_file:
             srt_display_name = srt_file.name
-            if srt_display_name.startswith(f"{job_id}_"):
+            if not config.USER_FACING_FILENAMES and srt_display_name.startswith(f"{job_id}_"):
                 srt_display_name = srt_display_name[len(job_id) + 1:]
 
         job_manager.update_job(
@@ -397,6 +490,11 @@ async def execute_download(job_id: str, request: DownloadRequest):
             stage="Ready to save"
         )
 
+    # The finished file has been moved out of the staging directory by
+        # yt-dlp, so the directory is now empty and must go too, or every
+        # desktop download would leave a .mediagrab-<id> folder behind.
+        _cleanup_staging_dir()
+
     except DownloadCancelled:
         purge_partials()
         job_manager.update_job(job_id, status="cancelled", stage="Download cancelled")
@@ -404,6 +502,8 @@ async def execute_download(job_id: str, request: DownloadRequest):
         raw = str(e)
         err_msg = raw.split('ERROR:')[-1].strip()
         job = job_manager.get_job(job_id)
+        # yt-dlp may surface an abort as a generic DownloadError, so the flag
+        # is the authoritative signal rather than the exception type.
         if job is not None and job.is_cancelled:
             purge_partials()
             job_manager.update_job(job_id, status="cancelled", stage="Download cancelled")

@@ -52,6 +52,16 @@ def hosted_srt(monkeypatch):
 
 
 @pytest.fixture
+def retention_enabled(monkeypatch):
+    """Assert hosted retention semantics.
+
+    Desktop mode disables deletion entirely (§1.3 Decision #12); these tests
+    cover the sweep itself, so retention is switched on explicitly.
+    """
+    monkeypatch.setattr(config, "RETENTION_ENABLED", True)
+
+
+@pytest.fixture
 def behind_proxy(monkeypatch):
     """Enable trusted-header IP resolution so tests can address clients by IP."""
     monkeypatch.setattr(config, "BEHIND_PROXY", True)
@@ -796,7 +806,7 @@ def test_abort_flag_causes_partial_purge(tmp_path, monkeypatch):
 # --- Retention ------------------------------------------------------------
 
 @pytest.mark.asyncio
-async def test_file_purge_is_scheduled_from_get_file(monkeypatch):
+async def test_file_purge_is_scheduled_from_get_file(monkeypatch, retention_enabled):
     """The retention clock must start on retrieval, not on job completion."""
     from app.api import routes as routes_mod
     from app.services.jobs import job_manager
@@ -846,7 +856,7 @@ async def test_file_survives_while_sitting_on_ready_screen():
     target.unlink()
 
 
-def test_watchdog_sweeps_unclaimed_files():
+def test_watchdog_sweeps_unclaimed_files(retention_enabled):
     from app.config import DOWNLOADS_DIR
 
     orphan = DOWNLOADS_DIR / "unclaimed_orphan_test.mp4"
@@ -858,7 +868,7 @@ def test_watchdog_sweeps_unclaimed_files():
     assert not orphan.exists()
 
 
-def test_watchdog_sweeps_claimed_but_stale_files():
+def test_watchdog_sweeps_claimed_but_stale_files(retention_enabled):
     """Once retrieved, a file ages out normally -- the ready screen no longer shields it."""
     from app.services.jobs import job_manager
     from app.config import DOWNLOADS_DIR
@@ -893,7 +903,7 @@ def test_watchdog_protects_in_flight_jobs():
     partial.unlink()
 
 
-def test_watchdog_keeps_fresh_unclaimed_files():
+def test_watchdog_keeps_fresh_unclaimed_files(retention_enabled):
     from app.config import DOWNLOADS_DIR
 
     fresh = DOWNLOADS_DIR / "fresh_orphan_test.mp4"

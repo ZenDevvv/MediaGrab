@@ -1,5 +1,8 @@
 import asyncio
 import json
+import os
+import subprocess
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -267,6 +270,35 @@ async def api_events(job_id: str):
             "X-Accel-Buffering": "no"
         }
     )
+
+
+@router.post("/open-folder")
+async def api_open_folder(request: Request):
+    """Reveal the output directory in the OS file manager (desktop only).
+
+    Hosted has no local filesystem to reveal, and there is no path a browser
+    could be pointed at, so this refuses rather than pretending to succeed.
+    """
+    if config.IS_HOSTED:
+        raise HTTPException(
+            status_code=404,
+            detail="Opening a local folder is only available in the desktop app.",
+        )
+
+    target = config.DOWNLOADS_DIR
+    try:
+        if sys.platform == "darwin":
+            subprocess.Popen(["open", str(target)])
+        elif sys.platform.startswith("win"):
+            os.startfile(str(target))  # type: ignore[attr-defined]
+        else:
+            subprocess.Popen(["xdg-open", str(target)],
+                             stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Could not open folder: {e}")
+
+    return {"opened": str(target)}
 
 
 @router.get("/file/{job_id}")

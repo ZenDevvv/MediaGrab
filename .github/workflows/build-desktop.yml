@@ -1,0 +1,137 @@
+name: Build Desktop Apps
+
+# Tag-triggered so artifacts are only produced for real releases.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    name: Windows (.exe)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller
+
+      - name: Install runtime dependencies
+        run: pip install -r requirements.txt
+
+      - name: Bundle FFmpeg
+        run: python packaging/fetch_ffmpeg.py
+
+      - name: Build
+        run: pyinstaller packaging/MediaGrab.spec --noconfirm --distpath dist --workpath build
+
+      - name: Smoke test backend starts
+        shell: pwsh
+        run: |
+          $exe = "dist\MediaGrab\MediaGrab.exe"
+          if (-not (Test-Path $exe)) { throw "Executable not produced" }
+          $p = Start-Process -FilePath $exe -ArgumentList "--no-browser","--port","8099" -PassThru
+          Start-Sleep -Seconds 15
+          try {
+            $r = Invoke-WebRequest -Uri "http://127.0.0.1:8099/api/capabilities" -UseBasicParsing -TimeoutSec 10
+            if ($r.StatusCode -ne 200) { throw "Backend returned $($r.StatusCode)" }
+            if ($r.Content -notmatch '"desktop"') { throw "Unexpected capabilities payload" }
+            Write-Host "Smoke test passed"
+          } finally {
+            if (-not $p.HasExited) { $p.Kill() }
+          }
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MediaGrab-Windows
+          path: dist/MediaGrab/
+          retention-days: 14
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/MediaGrab/MediaGrab.exe
+          fail_on_unmatched_files: false
+
+  linux:
+    name: Linux (tar.gz)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            python3-gi python3-gi-cairo gir1.2-gtk-3.0 libwebkit2gtk-4.1-0 xvfb
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyinstaller
+
+      - name: Install runtime dependencies
+        run: pip install -r requirements.txt
+
+      - name: Bundle FFmpeg
+        run: python packaging/fetch_ffmpeg.py
+
+      - name: Build
+        run: pyinstaller packaging/MediaGrab.spec --noconfirm --distpath dist --workpath build
+
+      - name: Smoke test backend starts
+        run: |
+          chmod +x dist/MediaGrab/MediaGrab
+          ./dist/MediaGrab/MediaGrab --no-browser --port 8099 &
+          PID=$!
+          for i in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:8099/api/capabilities > /tmp/caps.json; then
+              break
+            fi
+            sleep 1
+          done
+          grep -q '"desktop"' /tmp/caps.json || { echo "Unexpected capabilities payload"; cat /tmp/caps.json; exit 1; }
+          test -x dist/MediaGrab/_internal/ffmpeg/ffmpeg || echo "WARNING: bundled ffmpeg missing"
+          kill $PID
+          echo "Smoke test passed"
+
+      - name: Package tarball
+        run: |
+          tar -czf MediaGrab-Linux-x86_64.tar.gz -C dist MediaGrab
+          sha256sum MediaGrab-Linux-x86_64.tar.gz > MediaGrab-Linux-x86_64.tar.gz.sha256
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MediaGrab-Linux
+          path: |
+            MediaGrab-Linux-x86_64.tar.gz
+            MediaGrab-Linux-x86_64.tar.gz.sha256
+          retention-days: 14
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            MediaGrab-Linux-x86_64.tar.gz
+            MediaGrab-Linux-x86_64.tar.gz.sha256

@@ -1234,15 +1234,41 @@
     if (saveMediaBtn) {
       saveMediaBtn.href = data.download_url;
       saveMediaBtn.setAttribute('download', data.filename || 'media');
-      // Start the retention countdown at the moment the file is actually
-      // requested. This is the only event that triggers the server-side purge,
-      // so it is the only honest moment to count down from (§1.2 Decision #8).
-      saveMediaBtn.addEventListener('click', () => {
-        if (isHostedMode()) startDeletionCountdown(AppState.retentionSeconds);
-      }, { once: true });
+
+      if (isHostedMode()) {
+        // Hosted serves the file over HTTP; navigating here is what triggers
+        // the browser save and starts the server-side purge clock (§1.2 #8).
+        saveMediaBtn.addEventListener('click', () => {
+          startDeletionCountdown(AppState.retentionSeconds);
+        }, { once: true });
+      } else {
+        // Desktop already wrote the file to ~/Downloads server-side. Navigating
+        // here would save a second copy, so the button becomes "show me where"
+        // rather than a download trigger (§1.3 Decision #14).
+        saveMediaBtn.href = '#';
+        saveMediaBtn.removeAttribute('download');
+        saveMediaBtn.setAttribute('role', 'button');
+        saveMediaBtn.addEventListener('click', async (e) => {
+          e.preventDefault();
+          try {
+            const resp = await fetch(`${API_BASE}/open-folder`, { method: 'POST' });
+            if (!resp.ok) throw new Error('nope');
+            const label = $('#btn-save-label');
+            if (label) label.textContent = 'Opened folder';
+          } catch (err) {
+            const label = $('#btn-save-label');
+            if (label) label.textContent = 'Saved to Downloads';
+          }
+        }, { once: true });
+      }
     }
     const saveLbl = $('#btn-save-label');
-    if (saveLbl) saveLbl.textContent = `Save ${AppState.mode.toUpperCase()}`;
+    if (saveLbl) {
+      // Desktop has already saved the file by the time the ready screen shows.
+      saveLbl.textContent = isHostedMode()
+        ? `Save ${AppState.mode.toUpperCase()}`
+        : 'Open in Downloads';
+    }
 
     // Subtitle card if generated
     const srtCard = $('#ready-srt-card');
@@ -1256,9 +1282,14 @@
       if (subsBtn) {
         subsBtn.hidden = false;
         subsBtn.onclick = () => {
-          // The SRT is a separate server object with its own purge schedule.
-          if (isHostedMode()) startDeletionCountdown(AppState.retentionSeconds);
-          window.location.href = data.srt_url;
+          // The SRT is a separate server object. Desktop already wrote it to
+          // disk, so navigating would create a duplicate copy (§1.3 #14).
+          if (isHostedMode()) {
+            startDeletionCountdown(AppState.retentionSeconds);
+            window.location.href = data.srt_url;
+          } else {
+            fetch(`${API_BASE}/open-folder`, { method: 'POST' }).catch(() => {});
+          }
         };
       }
     } else {
