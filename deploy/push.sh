@@ -11,18 +11,28 @@
 set -euo pipefail
 
 VM_ID="${VM_ID:-vm-4ea425a9eae64c4bacd5fde0b2d9a99d}"
-TEAM_ID="${TEAM_ID:-acct-00a8ab64d7974b278232fad8bf8b95c0}"
+# Left empty so the CLI uses the authenticated active team. An explicit --team
+# would need the real team id (51fa42a6-...), not the acct- prefix form.
+TEAM_ID="${TEAM_ID:-}"
 REMOTE_DIR="${REMOTE_DIR:-/opt/mediagrab}"
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 if [ -z "${FREESTYLE_API_KEY:-}" ]; then
-  echo "[deploy] ERROR: FREESTYLE_API_KEY is not set." >&2
-  echo "[deploy] Run 'npx freestyle@latest login' or export the key." >&2
-  exit 1
+  # `freestyle login` stores the credential locally, so an absent env var does
+  # not necessarily mean unauthenticated. Let the CLI decide.
+  if ! npx --yes freestyle@latest whoami >/dev/null 2>&1; then
+    echo "[deploy] ERROR: not authenticated." >&2
+    echo "[deploy] Run 'npx freestyle@latest login' or export FREESTYLE_API_KEY." >&2
+    exit 1
+  fi
 fi
 
 fs() {
-  npx --yes freestyle@latest vm ssh "$VM_ID" --team "$TEAM_ID" --exec "$1"
+  if [ -n "$TEAM_ID" ]; then
+    npx --yes freestyle@latest vm ssh "$VM_ID" --team "$TEAM_ID" --exec "$1"
+  else
+    npx --yes freestyle@latest vm ssh "$VM_ID" --exec "$1"
+  fi
 }
 
 if [ "${1:-}" = "--commit" ]; then

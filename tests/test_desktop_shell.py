@@ -538,8 +538,20 @@ def test_push_script_requires_explicit_credentials():
     """The API key must never be hardcoded or committed."""
     script = Path("deploy/push.sh").read_text()
     assert "FREESTYLE_API_KEY" in script
-    assert "is not set" in script, "Must fail loudly when the key is absent"
+    assert "not authenticated" in script, "Must fail loudly when unauthenticated"
     assert "freestyle@latest login" in script, "Must tell the user how to authenticate"
+
+
+def test_push_script_does_not_hardcode_a_wrong_team_id():
+    """Regression: the acct- prefixed id was never a real team.
+
+    Deploying with it silently targeted a nonexistent team.
+    """
+    script = Path("deploy/push.sh").read_text()
+    assert "acct-00a8ab64d7974b278232fad8bf8b95c0" not in script, \
+        "Stale/incorrect team id must not be committed"
+    assert 'TEAM_ID="${TEAM_ID:-}"' in script, \
+        "Should default to the authenticated active team"
     # No literal secret in the file: the API key is never written down, only
     # read from the environment. (Team and VM ids are identifiers, not secrets.)
     assert "sk-" not in script
