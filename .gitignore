@@ -11,6 +11,11 @@
 id_rsa
 .freestyle/
 
+# YouTube session cookies -- live credentials, never commit
+cookies.txt
+*-cookies.txt
+ytdlp-cookies.txt
+
 # Python
 __pycache__/
 *.py[cod]

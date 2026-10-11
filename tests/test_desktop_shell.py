@@ -686,3 +686,46 @@ def test_youtube_egress_levers_are_configurable():
     # No literal proxy or cookie values committed (comments may show format).
     assignments = [l for l in cfg.splitlines() if "YTDLP_PROXY = os.getenv" in l]
     assert assignments and "socks5" not in assignments[0]
+
+
+# --- YouTube cookie/proxy provisioning -------------------------------------
+
+def test_cookie_install_script_is_safe_and_validating():
+    """Cookies are a live credential: validate format, lock permissions."""
+    script = Path("deploy/install-cookies.sh").read_text()
+    assert "install -m 600" in script, "Cookie file must be 0600"
+    assert "-o root -g root" in script
+    assert "Netscape" in script, "Must reject a file that is not cookies.txt"
+    assert "does not look like" in script
+    assert "systemctl restart mediagrab" in script
+    # Must offer a removal path so credentials can be revoked.
+    assert "remove)" in script
+    assert "rm -f" in script
+
+
+def test_provision_wires_cookies_and_proxy():
+    src = Path("deploy/provision.sh").read_text()
+    assert "MEDIA_GRAB_YTDLP_COOKIES" in src
+    assert "/etc/mediagrab/ytdlp-cookies.txt" in src
+    assert "MEDIA_GRAB_YTDLP_PROXY" in src
+    # Re-running without a cookie file must not leave a dangling path.
+    assert "/^MEDIA_GRAB_YTDLP_COOKIES=/d" in src
+
+
+def test_cookie_files_are_gitignored():
+    ignore = Path(".gitignore").read_text()
+    for pattern in ("cookies.txt", "*-cookies.txt", "ytdlp-cookies.txt"):
+        assert pattern in ignore, f"{pattern} must be gitignored"
+
+
+def test_no_cookie_or_proxy_secrets_committed():
+    """No literal cookie contents or proxy credentials in the repo."""
+    for name in ("app/config.py", ".env.example", "deploy/provision.sh",
+                 "deploy/install-cookies.sh"):
+        text = Path(name).read_text()
+        # Assignments and examples only; no real host/user:pass credentials.
+        for line in text.splitlines():
+            s = line.strip()
+            if s.startswith("#"):
+                continue
+            assert "user:pass@" not in s, f"{name}: literal proxy credential"

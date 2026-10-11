@@ -69,6 +69,31 @@ else
   log "Keeping existing $ENV_FILE (SESSION_SECRET preserved)"
 fi
 
+# --- YouTube cookies (optional) -------------------------------------------
+# A datacenter IP triggers YouTube's bot check. Cookies exported from a real
+# browser session are the standard workaround; see README for how to produce
+# one. The file is a live credential -- 0600, root-owned, never committed.
+COOKIE_FILE=/etc/mediagrab/ytdlp-cookies.txt
+if [ -s "$COOKIE_FILE" ]; then
+  log "Found YouTube cookie file; wiring MEDIA_GRAB_YTDLP_COOKIES"
+  sudo chmod 600 "$COOKIE_FILE"
+  if sudo grep -q "^MEDIA_GRAB_YTDLP_COOKIES=" "$ENV_FILE"; then
+    sudo sed -i "s|^MEDIA_GRAB_YTDLP_COOKIES=.*|MEDIA_GRAB_YTDLP_COOKIES=$COOKIE_FILE|" "$ENV_FILE"
+  else
+    echo "MEDIA_GRAB_YTDLP_COOKIES=$COOKIE_FILE" | sudo tee -a "$ENV_FILE" >/dev/null
+  fi
+elif sudo grep -q "^MEDIA_GRAB_YTDLP_COOKIES=" "$ENV_FILE"; then
+  log "No cookie file present; disabling MEDIA_GRAB_YTDLP_COOKIES"
+  sudo sed -i "/^MEDIA_GRAB_YTDLP_COOKIES=/d" "$ENV_FILE"
+fi
+
+# Egress proxy (the root fix for the bot check) is passed through if set.
+if [ -n "${MEDIA_GRAB_YTDLP_PROXY:-}" ]; then
+  log "Configuring egress proxy"
+  sudo sed -i "/^MEDIA_GRAB_YTDLP_PROXY=/d" "$ENV_FILE"
+  echo "MEDIA_GRAB_YTDLP_PROXY=$MEDIA_GRAB_YTDLP_PROXY" | sudo tee -a "$ENV_FILE" >/dev/null
+fi
+
 # --- service --------------------------------------------------------------
 log "Installing systemd unit"
 install -m 644 "$APP_DIR/deploy/mediagrab.service" "/etc/systemd/system/$SERVICE_NAME.service"

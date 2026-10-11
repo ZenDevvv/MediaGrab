@@ -149,6 +149,44 @@ The image is configured for `hosted` mode. It is a server deployment, not a desk
 
 ---
 
+## YouTube on a hosted (datacenter) IP
+
+YouTube will answer **`Sign in to confirm you're not a bot`** from a datacenter IP. This is address reputation, not configuration — measured on the hosted VM (2026-10):
+
+| Setup | Videos succeeded (of 4) |
+|---|---|
+| Default (Deno installed, PO-token clients excluded) | 1/4 |
+| `--impersonate chrome` | **0/4 — worse** |
+| Any of 11 player clients | Identical failures |
+
+An independent published measurement agrees: *16 public videos from a Hetzner address → 0/16; the same binary behind a trusted address → 22/22.*
+
+**MediaGrab already handles everything handleable in code:** the PO-token-dependent `web`/`mweb` clients are excluded, Deno is installed for the player challenge, and the extractor and downloader share one option builder. What remains needs infrastructure:
+
+**Lever 1 — cookies (free, temporary).** Export a logged-out cookie set from a real browser:
+
+```bash
+yt-dlp --cookies-from-browser chrome --cookies cookies.txt "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+```
+
+Then install it on the VM:
+
+```bash
+npx freestyle@latest vm scp cookies.txt vm-4ea425a9eae64c4bacd5fde0b2d9a99d:/tmp/
+npx freestyle@latest vm exec vm-4ea425a9eae64c4bacd5fde0b2d9a99d -- bash /opt/mediagrab/deploy/install-cookies.sh install /tmp/cookies.txt
+npx freestyle@latest vm exec vm-4ea425a9eae64c4bacd5fde0b2d9a99d -- bash /opt/mediagrab/deploy/install-cookies.sh check
+```
+
+Installed `0600` root-owned, and **never committed** (`cookies.txt` is gitignored).
+
+> **Limitation:** YouTube binds cookies to the address they came from, so cookies exported from your home network may not authenticate the VM.
+
+**Lever 2 — residential egress (costs money, reliably fixes it).** Set `MEDIA_GRAB_YTDLP_PROXY=socks5://user:pass@host:1080`. The only approach that reliably reaches ~100%, and what commercial download APIs sell.
+
+**Lever 3 — move YouTube work client-side.** The desktop and Android apps download from the user's own residential IP and never hit this. If the bot check proves persistent, steering users to the native apps is a legitimate answer, not a workaround.
+
+---
+
 ## Testing
 
 ```bash
