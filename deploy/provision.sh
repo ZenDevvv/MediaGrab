@@ -72,6 +72,28 @@ fi
 # --- service --------------------------------------------------------------
 log "Installing systemd unit"
 install -m 644 "$APP_DIR/deploy/mediagrab.service" "/etc/systemd/system/$SERVICE_NAME.service"
+
+# Optional: public exposure via a Cloudflare quick tunnel. Set ENABLE_TUNNEL=1.
+# The quick tunnel yields a RANDOM *.trycloudflare.com hostname on every start,
+# so it suits staging only -- use a named tunnel and your own domain for
+# anything stable.
+TUNNEL_NAME=mg-tunnel
+TUNNEL_BIN=/usr/local/bin/cloudflared
+if [ "${ENABLE_TUNNEL:-0}" = "1" ]; then
+  if [ ! -x "$TUNNEL_BIN" ]; then
+    log "Installing cloudflared"
+    curl -sL -o /tmp/cloudflared \
+      https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64
+    chmod +x /tmp/cloudflared
+    install -m 755 /tmp/cloudflared "$TUNNEL_BIN"
+    rm -f /tmp/cloudflared
+  fi
+  log "Installing $TUNNEL_NAME unit"
+  install -m 644 "$APP_DIR/deploy/$TUNNEL_NAME.service" "/etc/systemd/system/$TUNNEL_NAME.service"
+  systemctl daemon-reload
+  systemctl enable "$TUNNEL_NAME" >/dev/null 2>&1 || true
+  systemctl restart "$TUNNEL_NAME"
+fi
 systemctl daemon-reload
 systemctl enable "$SERVICE_NAME" >/dev/null 2>&1 || true
 systemctl restart "$SERVICE_NAME"

@@ -133,7 +133,7 @@
         <aside class="sidepanel" id="paste-recent-sidepanel">
           <div class="ph">
             <h3>Your files</h3>
-            <span class="mono">Cleared after 30 min</span>
+            <span class="mono" id="retention-side-label">Cleared after 60s</span>
           </div>
           <div id="sidepanel-history-list" class="recent-list">
             <p class="mono" style="padding: 12px 0;">No downloads yet. Paste a link to get started.</p>
@@ -176,7 +176,7 @@
         <svg class="ico" viewBox="0 0 24 24"><use href="#i-back"/></svg>
       </button>
     </div>
-    <p class="mono">Saved in this browser · Server clears files after 30 min</p>
+    <p class="mono" id="retention-drawer-note">Saved in this browser · Server clears files after 60s</p>
 
     <div id="drawer-history-list" class="file-cards" style="flex: 1; overflow-y: auto;">
       <!-- Populated from localStorage -->

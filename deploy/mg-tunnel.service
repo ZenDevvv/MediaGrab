@@ -1,0 +1,21 @@
+[Unit]
+Description=MediaGrab public tunnel (Cloudflare quick tunnel)
+After=network-online.target mediagrab.service
+Wants=network-online.target
+Requires=mediagrab.service
+
+[Service]
+Type=simple
+# Quick tunnels are anonymous: they get a random *.trycloudflare.com hostname
+# on every start, which changes whenever the unit restarts. That is fine for
+# staging and previews. For a stable production URL, replace this with a named
+# tunnel and a domain you control (see README).
+ExecStartPre=/bin/sleep 5
+ExecStart=/usr/local/bin/cloudflared tunnel --no-autoupdate --url http://127.0.0.1:8000
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -115,6 +115,7 @@
       };
       if (Number.isFinite(data.retention_seconds)) {
         AppState.retentionSeconds = data.retention_seconds;
+        renderRetentionCopy();
       }
     } catch (e) {
       // Hosted-safe defaults. Never block the page on this.
@@ -798,6 +799,25 @@
         cta.removeAttribute('aria-disabled');
       }
     }
+  }
+
+  // Retention is server-defined (60s hosted, 1800s desktop), so the copy must
+  // not hardcode it. Hardcoded "30 min" was showing on a hosted instance that
+  // deletes 60 seconds after retrieval.
+  function formatRetention(seconds) {
+    const s = Math.max(1, Math.round(Number(seconds) || 0));
+    if (s < 120) return `${s}s`;
+    if (s < 3600) return `${Math.round(s / 60)} min`;
+    const hours = s / 3600;
+    return `${hours % 1 === 0 ? hours : hours.toFixed(1)} hr`;
+  }
+
+  function renderRetentionCopy() {
+    const label = formatRetention(AppState.retentionSeconds);
+    const side = $('#retention-side-label');
+    if (side) side.textContent = `Cleared after ${label}`;
+    const drawer = $('#retention-drawer-note');
+    if (drawer) drawer.textContent = `Saved in this browser · Server clears files after ${label}`;
   }
 
   function initPromoStrip() {
@@ -1874,6 +1894,7 @@
     renderHistory();
     setupEventListeners();
     initPromoStrip();
+    renderRetentionCopy();
 
     if ($('#view-choose')) {
       initChoosePage();

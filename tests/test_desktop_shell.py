@@ -594,3 +594,30 @@ def test_promo_strip_does_not_force_download_attr_on_page_link():
     js = Path("static/js/app.js").read_text()
     assert "isRealDownload" in js
     assert "removeAttribute('download')" in js
+
+
+def test_retention_copy_is_not_hardcoded():
+    """Regression: hosted retention is 60s, but the UI said "Cleared after 30 min".
+
+    A visitor was told files survive 30 minutes on a server that deletes them 60
+    seconds after retrieval.
+    """
+    js = Path("static/js/app.js").read_text(encoding="utf-8")
+    html = Path("static/index.html").read_text(encoding="utf-8")
+
+    assert "Cleared after 30 min" not in html, "Retention copy is hardcoded and stale"
+    assert "Server clears files after 30 min" not in html
+    assert "renderRetentionCopy" in js
+    assert "AppState.retentionSeconds" in js
+    # The labels must exist for the script to populate.
+    assert 'id="retention-side-label"' in html
+    assert 'id="retention-drawer-note"' in html
+
+
+def test_tunnel_unit_is_committed_and_loopback_only():
+    """Cloudflare quick tunnel must front loopback, never expose 0.0.0.0."""
+    unit = Path("deploy/mg-tunnel.service").read_text()
+    assert "127.0.0.1:8000" in unit, "Tunnel must target loopback"
+    assert "0.0.0.0" not in unit
+    assert "Requires=mediagrab.service" in unit, "Tunnel must depend on the app"
+    assert "cloudflared" in unit
