@@ -26,6 +26,7 @@ from app.services.jobs import job_manager
 from app.services.downloader import execute_download
 from app.services.cleaner import deferred_file_removal
 from app.services.downloads import release_urls
+from app.services.logpaths import launcher_log_path
 from app.services.youtube_circuit import circuit as youtube_circuit
 from app.services.metadata import GuardrailError, get_cached_metadata, load_and_validate
 from app.services.network import (
@@ -66,6 +67,7 @@ async def api_capabilities():
     )
     return CapabilitiesResponse(
         mode="hosted" if hosted else "desktop",
+        version=config.APP_VERSION,
         retention_seconds=CLEANUP_GRACE_SECONDS,
         limits=limits,
         downloads=_release_urls(),
@@ -352,6 +354,159 @@ async def api_open_folder(request: Request):
         raise HTTPException(status_code=500, detail=f"Could not open folder: {e}")
 
     return {"opened": str(target)}
+
+
+# --- Diagnostics (§1.7) ---------------------------------------------------
+# Desktop-only. These exist so a user can hand over something useful when the
+# app misbehaves: the launcher log, which is the only record of a windowed
+# build's internals, and whether a newer release exists.
+
+#: Bytes of log returned to the clipboard. Enough for a recent failure without
+#: putting a multi-megabyte file on the clipboard.
+LOG_TAIL_BYTES = 200_000
+
+
+def _require_desktop(feature: str) -> None:
+    if config.IS_HOSTED:
+        raise HTTPException(
+            status_code=404,
+            detail=f"{feature} is only available in the desktop app.",
+        )
+
+
+def _reveal_in_os(path: Path) -> None:
+    """Open ``path`` with whatever the OS associates with it."""
+    if sys.platform == "darwin":
+        subprocess.Popen(["open", str(path)])
+    elif sys.platform.startswith("win"):
+        os.startfile(str(path))  # type: ignore[attr-defined]
+    else:
+        subprocess.Popen(["xdg-open", str(path)],
+                         stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL)
+
+
+def _parse_version(raw: str) -> tuple:
+    """Best-effort semver tuple. Unparseable input sorts lowest, not highest.
+
+    Returning ``(0,)`` for junk matters: a release tag we cannot read must
+    never be reported as newer than what the user is running.
+    """
+    cleaned = raw.strip().lstrip("vV").split("+")[0]
+    parts = []
+    for chunk in cleaned.split("."):
+        digits = "".join(ch for ch in chunk if ch.isdigit())
+        parts.append(int(digits) if digits else 0)
+    while len(parts) < 3:
+        parts.append(0)
+    return tuple(parts[:3])
+
+
+@router.get("/diagnostics/log")
+async def api_diagnostics_log(tail_bytes: int = Query(LOG_TAIL_BYTES, ge=1024, le=5_000_000)):
+    """Return the launcher log tail and where the file lives.
+
+    Only the tail is returned: the file grows without bound and a failed run is
+    always at the end.
+    """
+    _require_desktop("The launcher log")
+
+    path = launcher_log_path()
+    if not path.exists():
+        return {
+            "path": str(path),
+            "exists": False,
+            "content": "",
+            "message": "No log file yet. It is created the first time the app starts.",
+        }
+
+    try:
+        size = path.stat().st_size
+        with open(path, "rb") as fh:
+            if size > tail_bytes:
+                fh.seek(size - tail_bytes)
+            data = fh.read()
+        content = data.decode("utf-8", errors="replace")
+    except OSError as e:
+        raise HTTPException(status_code=500, detail=f"Could not read the log: {e}")
+
+    return {
+        "path": str(path),
+        "exists": True,
+        "truncated": size > tail_bytes,
+        "content": content,
+    }
+
+
+@router.post("/diagnostics/open-log")
+async def api_diagnostics_open_log():
+    """Reveal launcher.log in the OS default application."""
+    _require_desktop("Opening the log file")
+
+    path = launcher_log_path()
+    if not path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail="No log file yet. Start the app once and try again.",
+        )
+    try:
+        _reveal_in_os(path)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Could not open the log: {e}")
+    return {"opened": str(path)}
+
+
+@router.get("/diagnostics/update-check")
+async def api_diagnostics_update_check():
+    """Compare the running build against the newest GitHub release.
+
+    Goes through the server rather than the browser so it works identically in
+    the packaged app, where the page is served from a loopback address and the
+    release API would be a cross-origin request.
+    """
+    _require_desktop("Update checks")
+
+    current = config.APP_VERSION
+    url = f"https://api.github.com/repos/{config.GITHUB_REPO}/releases/latest"
+    try:
+        import httpx
+
+        response = httpx.get(
+            url,
+            timeout=10.0,
+            follow_redirects=True,
+            headers={"Accept": "application/vnd.github+json"},
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except Exception as e:
+        # A failed check must not look like "no update": say we could not tell.
+        raise HTTPException(
+            status_code=503,
+            detail=f"Could not reach GitHub to check for updates: {e}",
+        )
+
+    latest_tag = payload.get("tag_name") or "0"
+    html_url = payload.get("html_url") or f"https://github.com/{config.GITHUB_REPO}/releases/latest"
+
+    if current in ("dev", "", None):
+        return {
+            "current": current,
+            "latest": latest_tag,
+            "update_available": False,
+            "release_url": html_url,
+            "checked": True,
+            "note": "Development build; version comparison is skipped.",
+        }
+
+    update_available = _parse_version(latest_tag) > _parse_version(current)
+    return {
+        "current": current,
+        "latest": latest_tag,
+        "update_available": update_available,
+        "release_url": html_url,
+        "checked": True,
+    }
 
 
 @router.get("/file/{job_id}")

@@ -83,21 +83,9 @@ def _report_fatal(log_path: Optional[Path], message: str) -> None:
         pass
 
 
-def launcher_log_path() -> Path:
-    """Where the launcher writes its log.
-
-    A windowed build has no console, so anything written to stdout/stderr is
-    invisible to the user. Worse, an exception raised inside the server thread
-    is printed by the threading machinery to stderr and then lost, which is
-    how a dead backend could present as nothing more than a browser error page
-    inside the app window.
-    """
-    if sys.platform == "win32":
-        base = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA")
-        root = Path(base) if base else Path.home() / "AppData" / "Local"
-    else:
-        root = Path.home() / ".mediagrab"
-    return root / "MediaGrab" / "launcher.log"
+# The log path is defined once, in app.services.logpaths, so the settings
+# panel reveals and copies the same file the launcher writes. See §1.7.
+from app.services.logpaths import browser_profile_dir, launcher_log_path  # noqa: E402
 
 
 def _open_launcher_log():
@@ -340,7 +328,7 @@ def launch(url: str, prefer_native: bool = True, timeout: int = 120) -> int:
             # the window is still open, the caller tears the backend down, and
             # the live window reports "127.0.0.1 refused to connect". A private
             # profile forces a separate process that owns the window.
-            profile = launcher_log_path().parent / "browser-profile"
+            profile = browser_profile_dir()
             profile.mkdir(parents=True, exist_ok=True)
             print(f"[MediaGrab] Opening app-mode window via {chromium}...")
             proc = subprocess.Popen(

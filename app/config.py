@@ -7,6 +7,15 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 DOWNLOADS_DIR = Path(os.getenv("MEDIA_GRAB_DOWNLOADS_DIR") or (BASE_DIR / "downloads"))
 STATIC_DIR = BASE_DIR / "static"
 
+# Version of the running build. Sourced from the tag at package time so the
+# settings panel can compare against the latest GitHub release; an update check
+# is meaningless without knowing what is running. "dev" outside CI.
+APP_VERSION = os.getenv("MEDIA_GRAB_VERSION", "dev")
+
+# Public repository used for the update check. Kept next to GITHUB_RELEASES_URL
+# so both point at the same project.
+GITHUB_REPO = os.getenv("MEDIA_GRAB_GITHUB_REPO", "ZenDevvv/MediaGrab")
+
 # Ensure downloads directory exists
 DOWNLOADS_DIR.mkdir(parents=True, exist_ok=True)
 

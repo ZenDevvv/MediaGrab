@@ -1109,6 +1109,58 @@ svg .t-hill-f { fill: var(--ink); fill-opacity: 0.12; }
   overflow-y: auto;
 }
 .drawer-panel.open { transform: translateX(0); }
+/* Settings is anchored left: its trigger is a lower-left cog, and opening a
+   right-hand panel from a left-hand control is disorienting. */
+.drawer-panel-left {
+  right: auto; left: 0;
+  border-left: none; border-right: 1.5px solid var(--line);
+  transform: translateX(-100%);
+}
+.drawer-panel-left.open { transform: translateX(0); }
+
+/* Floating settings trigger (§1.7) */
+.fab-settings {
+  position: fixed;
+  left: 18px; bottom: 18px;
+  width: 40px; height: 40px;
+  display: grid; place-items: center;
+  border-radius: 50%;
+  border: 1.5px solid var(--edge);
+  background: var(--card);
+  color: var(--ink);
+  box-shadow: 2px 2px 0 var(--edge);
+  cursor: pointer;
+  z-index: 90;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.fab-settings:hover { transform: translate(-1px, -1px); box-shadow: 3px 3px 0 var(--edge); }
+.fab-settings:active { transform: translate(1px, 1px); box-shadow: 1px 1px 0 var(--edge); }
+.fab-settings:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Settings drawer contents */
+.settings-group {
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 14px;
+  border: 1.5px solid var(--line);
+  border-radius: 16px;
+  background: var(--card);
+}
+.settings-label {
+  font-family: var(--font-mono); font-size: 11px;
+  letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted);
+}
+.settings-value { font-size: 15px; color: var(--ink); margin: 0; }
+.settings-hint { font-size: 13px; line-height: 1.45; color: var(--muted); margin: 0; }
+.settings-path { font-size: 11px; color: var(--muted); margin: 0; overflow-wrap: anywhere; }
+.settings-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.settings-actions .btn, .settings-group > .btn { text-decoration: none; }
+.settings-note { font-size: 12px; color: var(--muted); margin: 0; line-height: 1.4; }
+.settings-note.ok { color: var(--ok); }
+.settings-note.warn { color: var(--bad); }
+.settings-foot {
+  margin-top: auto; padding-top: 8px;
+  font-size: 11px; color: var(--muted);
+}
 .drawer-header { display: flex; justify-content: space-between; align-items: center; }
 
 /* Utility & Mono Elements */

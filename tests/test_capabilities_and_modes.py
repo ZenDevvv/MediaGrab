@@ -4,6 +4,8 @@ import asyncio
 import os
 import time
 
+from pathlib import Path
+
 import pytest
 from httpx import AsyncClient, ASGITransport
 
@@ -1272,3 +1274,185 @@ def test_job_failures_can_carry_a_code_to_the_client():
 
     assert resp.code == "UPSTREAM_BLOCKED"
     assert resp.error == "blocked"
+
+
+# --- Settings diagnostics & update check (§1.7) ---------------------------
+
+def test_version_is_reported_in_capabilities():
+    from app import config
+
+    transport = ASGITransport(app=app)
+    async def run():
+        async with AsyncClient(transport=transport, base_url="http://t") as client:
+            return await client.get("/api/capabilities")
+
+    import asyncio
+    resp = asyncio.run(run())
+    assert resp.status_code == 200
+    assert resp.json()["version"] == config.APP_VERSION
+
+
+def test_version_parse_orders_correctly():
+    from app.api.routes import _parse_version
+
+    assert _parse_version("v0.2.0") > _parse_version("v0.1.9")
+    assert _parse_version("1.10.0") > _parse_version("1.9.0")
+    assert _parse_version("v0.1.1") == _parse_version("0.1.1")
+    # Unreadable input must never look newer than what is running.
+    assert _parse_version("not-a-version") == (0, 0, 0)
+    assert not (_parse_version("nightly") > _parse_version("0.1.6"))
+
+
+@pytest.mark.asyncio
+async def test_update_check_reports_a_newer_release(monkeypatch):
+    import httpx
+    from app.api import routes as routes_mod
+
+    class FakeResponse:
+        def raise_for_status(self): pass
+        def json(self):
+            return {"tag_name": "v9.9.9",
+                    "html_url": "https://github.com/x/y/releases/tag/v9.9.9"}
+
+    monkeypatch.setattr(routes_mod.config, "IS_HOSTED", False)
+    monkeypatch.setattr(routes_mod.config, "APP_VERSION", "v0.1.0")
+    monkeypatch.setattr(httpx, "get", lambda *a, **k: FakeResponse())
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as client:
+        r = await client.get("/api/diagnostics/update-check")
+
+    assert r.status_code == 200
+    body = r.json()
+    assert body["update_available"] is True
+    assert body["latest"] == "v9.9.9"
+    assert body["current"] == "v0.1.0"
+
+
+@pytest.mark.asyncio
+async def test_update_check_reports_up_to_date(monkeypatch):
+    import httpx
+    from app.api import routes as routes_mod
+
+    class FakeResponse:
+        def raise_for_status(self): pass
+        def json(self):
+            return {"tag_name": "v0.1.6", "html_url": "https://example.invalid"}
+
+    monkeypatch.setattr(routes_mod.config, "IS_HOSTED", False)
+    monkeypatch.setattr(routes_mod.config, "APP_VERSION", "v0.1.6")
+    monkeypatch.setattr(httpx, "get", lambda *a, **k: FakeResponse())
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as client:
+        r = await client.get("/api/diagnostics/update-check")
+
+    assert r.json()["update_available"] is False
+
+
+@pytest.mark.asyncio
+async def test_update_check_says_so_when_it_cannot_tell(monkeypatch):
+    """A failed check must not be reported as 'no update available'."""
+    import httpx
+    from app.api import routes as routes_mod
+
+    def boom(*a, **k):
+        raise RuntimeError("no network")
+
+    monkeypatch.setattr(routes_mod.config, "IS_HOSTED", False)
+    monkeypatch.setattr(httpx, "get", boom)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as client:
+        r = await client.get("/api/diagnostics/update-check")
+
+    assert r.status_code == 503
+    assert "update_available" not in r.json()
+
+
+@pytest.mark.asyncio
+async def test_dev_build_skips_version_comparison(monkeypatch):
+    import httpx
+    from app.api import routes as routes_mod
+
+    class FakeResponse:
+        def raise_for_status(self): pass
+        def json(self):
+            return {"tag_name": "v9.9.9", "html_url": "https://example.invalid"}
+
+    monkeypatch.setattr(routes_mod.config, "IS_HOSTED", False)
+    monkeypatch.setattr(routes_mod.config, "APP_VERSION", "dev")
+    monkeypatch.setattr(httpx, "get", lambda *a, **k: FakeResponse())
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as client:
+        r = await client.get("/api/diagnostics/update-check")
+
+    body = r.json()
+    assert body["update_available"] is False
+    assert "Development build" in body["note"]
+
+
+@pytest.mark.asyncio
+async def test_log_endpoints_return_the_tail(monkeypatch, tmp_path):
+    from app.api import routes as routes_mod
+
+    log = tmp_path / "launcher.log"
+    log.write_text("\n".join(f"line {i}" for i in range(500)), encoding="utf-8")
+    monkeypatch.setattr(routes_mod, "launcher_log_path", lambda: log)
+    monkeypatch.setattr(routes_mod.config, "IS_HOSTED", False)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as client:
+        r = await client.get("/api/diagnostics/log", params={"tail_bytes": 2048})
+        assert r.status_code == 200
+        body = r.json()
+        assert body["exists"] is True
+        assert body["truncated"] is True
+        assert "line 499" in body["content"]
+        assert str(log) == body["path"]
+
+
+@pytest.mark.asyncio
+async def test_log_endpoint_handles_a_missing_file(monkeypatch, tmp_path):
+    from app.api import routes as routes_mod
+
+    monkeypatch.setattr(routes_mod, "launcher_log_path", lambda: tmp_path / "nope.log")
+    monkeypatch.setattr(routes_mod.config, "IS_HOSTED", False)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as client:
+        r = await client.get("/api/diagnostics/log")
+
+    body = r.json()
+    assert body["exists"] is False
+    assert body["content"] == ""
+    assert "message" in body
+
+
+@pytest.mark.asyncio
+async def test_diagnostics_are_refused_on_hosted():
+    """Hosted has no local log to open and is always current."""
+    from app.api import routes as routes_mod
+
+    monkeypatch_holder = routes_mod.config
+    original = monkeypatch_holder.IS_HOSTED
+    monkeypatch_holder.IS_HOSTED = True
+    try:
+        transport = ASGITransport(app=app)
+        async with AsyncClient(transport=transport, base_url="http://t") as client:
+            assert (await client.get("/api/diagnostics/log")).status_code == 404
+            assert (await client.post("/api/diagnostics/open-log")).status_code == 404
+            assert (await client.get("/api/diagnostics/update-check")).status_code == 404
+    finally:
+        monkeypatch_holder.IS_HOSTED = original
+
+
+def test_log_path_is_defined_once_and_shared():
+    """Two definitions would drift, and the panel would open the wrong file."""
+    from app.services.logpaths import launcher_log_path
+
+    root = Path(__file__).resolve().parent.parent
+    assert launcher_log_path().name == "launcher.log"
+    assert "launcher_log_path" in (root / "run_desktop.py").read_text()
+    assert "app.services.logpaths" in (root / "app" / "api" / "routes.py").read_text()

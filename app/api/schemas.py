@@ -61,6 +61,9 @@ class DownloadsResponse(BaseModel):
 
 class CapabilitiesResponse(BaseModel):
     mode: Literal["desktop", "hosted"]
+    # Running build version, so the settings panel can show it and the client
+    # can compare against the latest release without a second endpoint.
+    version: str = "dev"
     retention_seconds: int
     limits: LimitsResponse
     downloads: DownloadsResponse

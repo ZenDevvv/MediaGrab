@@ -469,3 +469,92 @@ def test_download_fixture_is_committed():
     assert fixture.stat().st_size > 0
     # Small on purpose: CI runs this on every tag.
     assert fixture.stat().st_size < 200_000
+
+
+# --- Settings panel (§1.7) -------------------------------------------------
+
+@pytest.mark.parametrize("page", ["index.html", "choose.html"])
+def test_settings_drawer_markup_is_present_on_both_screens(page):
+    with open(f"static/{page}", "r", encoding="utf-8") as f:
+        html = f.read()
+    assert 'id="btn-settings"' in html
+    assert 'id="settings-drawer"' in html
+    assert 'id="settings-backdrop"' in html
+    assert 'id="i-gear"' in html
+    # The two capabilities the user asked for.
+    assert 'id="btn-open-log"' in html
+    assert 'id="btn-copy-log"' in html
+    assert 'id="btn-check-updates"' in html
+
+
+def test_settings_groups_are_hidden_on_hosted_by_default():
+    """Diagnostics and update checks are desktop-only; hidden, not dead."""
+    with open("static/index.html", "r", encoding="utf-8") as f:
+        html = f.read()
+    assert 'id="settings-log-group" hidden' in html
+    assert 'id="settings-update-group" hidden' in html
+
+    with open("static/js/app.js", "r", encoding="utf-8") as f:
+        js = f.read()
+    start = js.index("async function wireSettings")
+    body = js[start:js.index("function openSettingsDrawer", start)] if "function openSettingsDrawer" in js[start:] else js[start:start + 6000]
+    assert "isHostedMode()" in body
+    # Hosted must not show controls its API refuses.
+    assert "settings-update-group" in body
+
+
+def test_settings_drawer_anchors_left_and_cog_is_lower_left():
+    with open("static/css/app.css", "r", encoding="utf-8") as f:
+        css = f.read()
+    assert ".drawer-panel-left" in css
+    start = css.index(".fab-settings {")
+    block = css[start:css.index("}", start)]
+    assert "left:" in block and "bottom:" in block
+    assert "position: fixed" in block
+    # Anchored left, since the trigger is on the left.
+    left = css[css.index(".drawer-panel-left {"):css.index("}", css.index(".drawer-panel-left {"))]
+    assert "left: 0" in left and "translateX(-100%)" in left
+
+
+def test_copy_log_falls_back_when_clipboard_api_is_unavailable():
+    """A packaged app may not have clipboard permission; the text must still land."""
+    with open("static/js/app.js", "r", encoding="utf-8") as f:
+        js = f.read()
+    start = js.index("const btnCopyLog")
+    body = js[start:js.index("if (label && original)", start)]
+    assert "navigator.clipboard" in body
+    assert "execCommand" in body
+
+
+def test_build_stamps_the_version_from_the_tag():
+    """An update check cannot work if every build reports itself as dev."""
+    import yaml
+
+    jobs = _workflow()["jobs"]
+    for name in ("windows", "linux"):
+        steps = jobs[name]["steps"]
+        stamp = next((s for s in steps if s.get("name") == "Stamp version"), None)
+        assert stamp is not None, f"{name} does not stamp a version"
+        assert "MEDIA_GRAB_VERSION" in stamp["run"]
+        assert "GITHUB_REF_NAME" in stamp["run"], "must use the tag being built"
+        # It must happen before the build so the constant is baked in.
+        names = [s.get("name") for s in steps]
+        assert names.index("Stamp version") < names.index("Build")
+
+
+def test_settings_labels_do_not_uppercase_the_log_path():
+    """A path shown in the wrong case is a path you cannot paste back in."""
+    with open("static/css/app.css", "r", encoding="utf-8") as f:
+        css = f.read()
+    assert ".settings-label" in css
+    label_rule = css[css.index(".settings-label {"):css.index("}", css.index(".settings-label {"))]
+    assert "text-transform: uppercase" in label_rule
+    # The blanket rule that caused it must be gone.
+    assert ".settings-group .mono {" not in css
+
+    with open("static/index.html", "r", encoding="utf-8") as f:
+        html = f.read()
+    assert '<span class="settings-label">Version</span>' in html
+    assert '<span class="mono">Version</span>' not in html
+    # The path and note stay lowercase-capable.
+    assert 'id="settings-log-path"' in html

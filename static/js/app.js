@@ -381,6 +381,185 @@
     $('#history-drawer').classList.remove('open');
   }
 
+  // --- Settings (§1.7 Decision #24) ---
+  function openSettingsDrawer() {
+    const drawer = $('#settings-drawer');
+    if (!drawer) return;
+    drawer.classList.add('open');
+    drawer.setAttribute('aria-hidden', 'false');
+    $('#settings-backdrop').classList.add('open');
+    loadLogInfo();
+  }
+
+  function closeSettingsDrawer() {
+    const drawer = $('#settings-drawer');
+    if (!drawer) return;
+    drawer.classList.remove('open');
+    drawer.setAttribute('aria-hidden', 'true');
+    $('#settings-backdrop').classList.remove('open');
+  }
+
+  function setNote(id, text, tone) {
+    const el = $(id);
+    if (!el) return;
+    el.textContent = text;
+    el.classList.remove('ok', 'warn');
+    if (tone) el.classList.add(tone);
+  }
+
+  // Show where the log lives and whether it has anything to show, so the panel
+  // is informative before the user clicks anything.
+  async function loadLogInfo() {
+    const group = $('#settings-log-group');
+    if (!group) return;
+    try {
+      const resp = await fetch(`${API_BASE}/diagnostics/log`);
+      if (resp.status === 404) {
+        // Hosted: nothing local to inspect.
+        group.hidden = true;
+        return;
+      }
+      group.hidden = false;
+      const data = await resp.json();
+      const pathEl = $('#settings-log-path');
+      if (pathEl) pathEl.textContent = data.path || '';
+      const note = data.exists
+        ? (data.truncated ? 'Showing the most recent part of the log.' : 'Log is ready.')
+        : (data.message || 'No log file yet.');
+      setNote('#settings-log-note', note, data.exists ? null : 'warn');
+    } catch (e) {
+      group.hidden = true;
+    }
+  }
+
+  async function wireSettings() {
+    const openBtn = $('#btn-settings');
+    const closeBtn = $('#btn-close-settings');
+    const backdrop = $('#settings-backdrop');
+    if (openBtn) openBtn.addEventListener('click', openSettingsDrawer);
+    if (closeBtn) closeBtn.addEventListener('click', closeSettingsDrawer);
+    if (backdrop) backdrop.addEventListener('click', closeSettingsDrawer);
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') closeSettingsDrawer();
+    });
+
+    // Version.
+    const verEl = $('#settings-version');
+    if (verEl) {
+      try {
+        const resp = await fetch(`${API_BASE}/capabilities`);
+        if (resp.ok) {
+          const caps = await resp.json();
+          verEl.textContent = caps.version || '—';
+        }
+      } catch (e) { /* leave the placeholder */ }
+    }
+
+    const modeNote = $('#settings-mode-note');
+    if (modeNote) {
+      modeNote.textContent = isHostedMode()
+        ? 'Diagnostics and update checks are available in the desktop app.'
+        : 'Files download straight to your machine.';
+    }
+
+    // Update check. Desktop only; a hosted instance is always current.
+    const updateGroup = $('#settings-update-group');
+    if (updateGroup) updateGroup.hidden = isHostedMode();
+
+    const btnCheck = $('#btn-check-updates');
+    if (btnCheck) {
+      btnCheck.addEventListener('click', async () => {
+        btnCheck.disabled = true;
+        const label = btnCheck.querySelector('span');
+        const original = label ? label.textContent : null;
+        if (label) label.textContent = 'Checking...';
+        try {
+          const resp = await fetch(`${API_BASE}/diagnostics/update-check`);
+          const data = await resp.json().catch(() => ({}));
+          if (!resp.ok) {
+            setNote('#settings-update-note', data.detail || 'Could not check for updates.', 'warn');
+            return;
+          }
+          const dl = $('#btn-download-update');
+          if (data.update_available) {
+            setNote(
+              '#settings-update-note',
+              `Version ${data.latest} is available. You have ${data.current}.`,
+              'warn'
+            );
+            if (dl) {
+              dl.hidden = false;
+              dl.href = data.release_url || '#';
+              const dlLabel = dl.querySelector('span');
+              if (dlLabel) dlLabel.textContent = `Download ${data.latest}`;
+            }
+          } else {
+            setNote(
+              '#settings-update-note',
+              `You're up to date${data.latest ? ` (${data.latest})` : ''}.`,
+              'ok'
+            );
+            if (dl) dl.hidden = true;
+          }
+        } catch (e) {
+          setNote('#settings-update-note', 'Could not check for updates.', 'warn');
+        } finally {
+          btnCheck.disabled = false;
+          if (label && original) label.textContent = original;
+        }
+      });
+    }
+
+    const btnOpenLog = $('#btn-open-log');
+    if (btnOpenLog) {
+      btnOpenLog.addEventListener('click', async () => {
+        try {
+          const resp = await fetch(`${API_BASE}/diagnostics/open-log`, { method: 'POST' });
+          if (!resp.ok) throw new Error('unavailable');
+          setNote('#settings-log-note', 'Log opened in your editor.', 'ok');
+        } catch (e) {
+          setNote('#settings-log-note', 'Could not open the log file.', 'warn');
+        }
+      });
+    }
+
+    const btnCopyLog = $('#btn-copy-log');
+    if (btnCopyLog) {
+      btnCopyLog.addEventListener('click', async () => {
+        const label = btnCopyLog.querySelector('span');
+        const original = label ? label.textContent : null;
+        try {
+          const resp = await fetch(`${API_BASE}/diagnostics/log`);
+          if (!resp.ok) throw new Error('unavailable');
+          const data = await resp.json();
+          if (!data.content) {
+            setNote('#settings-log-note', 'The log is empty.', 'warn');
+            return;
+          }
+          try {
+            await navigator.clipboard.writeText(data.content);
+          } catch (e) {
+            // Clipboard API needs a secure context or permission; fall back so
+            // the user still gets the text.
+            const ta = document.createElement('textarea');
+            ta.value = data.content;
+            ta.style.position = 'fixed';
+            ta.style.opacity = '0';
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            document.body.removeChild(ta);
+          }
+          setNote('#settings-log-note', 'Log copied to your clipboard.', 'ok');
+        } catch (e) {
+          setNote('#settings-log-note', 'Could not copy the log.', 'warn');
+        } finally {
+          if (label && original) label.textContent = original;
+        }
+      });
+    }
+  }
+
   // --- Waveform & Trim Controller ---
   const BAR_COUNT = 56;
   function initTrimWaveform() {
@@ -1736,6 +1915,7 @@
     const btnClearHist = $('#btn-clear-history');
     if (btnClearHist) btnClearHist.addEventListener('click', clearHistory);
     wireOpenDownloads();
+    wireSettings();
 
     // Form Inspect (Home page)
     const formInspect = $('#form-inspect');
