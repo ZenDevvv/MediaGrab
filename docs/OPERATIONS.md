@@ -110,25 +110,75 @@ setting in the system: any client could forge `X-Forwarded-For`.
 
 ## 2. VM lifecycle — read this before planning around the instance
 
-The platform applies two separate timers, and they are easy to conflate.
+The platform applies separate timers, and they are easy to conflate. Current
+values on `mediagrab`, confirmed via `vm list --output json`:
 
-| Timer | Value | Effect |
+| Field | Value | Meaning |
 |---|---|---|
-| **Idle timeout** | 1800 s | The VM **pauses**. Memory and processes are frozen and preserved; the next inbound request **wakes it**. |
-| **Auto-delete** | 2 592 000 s (30 days) | The VM is **deleted**, disk and all, after this much *continuous* idleness. |
+| `idleTimeoutSeconds` | **300** | The VM **pauses** after 5 minutes with no network activity. Memory and processes are frozen and preserved. |
+| `autoDeleteSeconds` | 2 592 000 (**30 days**) | The VM is **deleted**, disk included, after 30 days of *continuous* idleness. |
+| `automaticRestart` | `true` | An unexpected stop is booted again. |
 
-Verified behaviour: a paused VM woke on the first inbound HTTPS request, with
-no measurable cold-start penalty (0.62 s cold versus 0.62 s warm).
+### 2.1 Pause is harmless
 
-**The 30-day clock is the real risk, not the pause.** A hosted instance that
-nobody visits for a month is gone. Regular traffic resets it. If that is
-unacceptable, remove the auto-delete:
+A paused VM resumes on the next inbound request. Measured: a VM paused for
+155 s and woken by a single HTTPS request served in **0.63 s**, against 0.63 s
+warm. There is no cold-start penalty worth worrying about.
 
-```bash
-npx freestyle@latest vm update mediagrab --set auto-delete-seconds -1
+Guest clocks keep running while frozen, which matters for the circuit breaker
+(`§6`). Verified by reading `time.monotonic()` either side of a 155 s pause:
+
+```json
+{"mono_advanced_s": 155.6, "wall_advanced_s": 155.6, "drift_s": 0.0}
 ```
 
----
+So a 30-minute YouTube cooldown really is 30 minutes of wall time, whether the
+VM was running or asleep. Had monotonic frozen, a paused VM could have held the
+breaker open indefinitely.
+
+Note the timeout is **300 s, not the 1800 s this file previously claimed.** It
+changed during the setup session without being set here; re-check
+`vm list --output json` rather than trusting this table. A longer timeout keeps
+the VM running between visits, which costs nothing measurable but is only worth
+changing if the pause churn is unwelcome:
+
+```bash
+npx freestyle@latest vm update mediagrab --idle-timeout-seconds 1800
+```
+
+### 2.2 Auto-delete is the only destructive timer
+
+It fires after 30 days of **continuous** idleness — not 30 days since
+creation. Any request wakes the VM and restarts the clock, so an instance that
+sees occasional traffic is not at risk. The failure mode is specifically: *no
+traffic at all for a month*, after which the VM and its disk are gone and the
+instance must be rebuilt.
+
+**It cannot be changed from the CLI.** `vm update` exposes only `--slug`,
+`--display-name`, `--idle-timeout-seconds`, `--automatic-restart` and
+`--metadata`; there is no auto-delete flag. The field also reports
+`autoDeleteFromPlan: true`, meaning the 30-day cap comes from the plan rather
+than from this VM's configuration — and the docs note that on plans which cap it,
+setting `-1` *restores the plan's cap* rather than removing it.
+
+So there are three honest options:
+
+1. **Accept it.** The instance is reproducible from this repository in minutes,
+   and the release artefacts are on GitHub regardless. The retained state is a
+   deployment, not data.
+2. **Keep it alive** with an external periodic request (a scheduled job, a cron
+   on another machine) hitting the public URL well inside 30 days.
+3. **Ask the platform** whether the plan's cap can be raised.
+
+What does *not* work: any `vm update ... --set auto-delete-seconds` command.
+An earlier version of this file contained one. It was never a valid flag, and
+`-1` would not have removed the cap anyway.
+
+### 2.3 The instance is a deployment, not a dependency
+
+Nothing of lasting value lives on the VM. Downloads are ephemeral by design
+(60 s post-retrieval), the app is rebuilt from the repo, and desktop artefacts
+are GitHub release assets. Treat a deletion as a rebuild, not a data loss.
 
 ## 3. Publishing a desktop release
 
@@ -308,7 +358,8 @@ print('open:', circuit.is_open(), 'remaining:', round(circuit.remaining()), 'tri
 ```
 
 State is per-process and is not persisted: restarting the service resets the
-breaker, which costs one probe. That is the safe direction, but it is worth
+breaker, which costs one probe. A *pause* does not — guest monotonic time keeps
+running while the VM is frozen, so the cooldown is wall-clock accurate (§2.1). That is the safe direction, but it is worth
 knowing before scheduling a restart near a traffic peak.
 
 **Do not respond to a YouTube failure by retrying.** Retry loops against a

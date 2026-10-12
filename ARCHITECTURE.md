@@ -523,5 +523,7 @@ reading the code, which is why they are written down.
   hard-killed; abort sets an event polled at the next hook tick.
 - **Session-first rate limiting is unexercised in real multi-user conditions.**
   Tests prove semantics; nothing proves behaviour under actual NAT traffic.
-- **The VM is deleted after 30 days of continuous idleness**, not merely paused.
-  Regular traffic resets it. See `docs/OPERATIONS.md`.
+- **The VM is deleted after 30 days of continuous idleness**, not merely
+  paused — the 5-minute idle timeout only pauses it, and any request restarts
+  the auto-delete clock. The cap is plan-derived and not adjustable from the
+  CLI. See `docs/OPERATIONS.md` §2.

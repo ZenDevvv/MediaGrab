@@ -743,3 +743,18 @@ def test_prd_status_table_is_current():
     n4 = next(l for l in prd.splitlines() if l.startswith("| N4"))
     counts = set(re.findall(r"(\d+)\s+tests", prd))
     assert len(counts) == 1, f"PRD quotes conflicting test counts: {counts}"
+
+
+def test_operations_does_not_document_a_nonexistent_cli_flag():
+    """A published command that never existed is worse than no command.
+
+    `vm update` exposes no auto-delete flag, and an earlier revision of the
+    runbook told an operator to use one.
+    """
+    import pathlib
+    root = pathlib.Path(__file__).resolve().parent.parent
+    ops = (root / "docs" / "OPERATIONS.md").read_text()
+
+    # Named only in order to say it does not work.
+    assert "--set auto-delete-seconds" not in ops or "What does *not* work" in ops
+    assert "--idle-timeout-seconds" in ops  # the flag that does exist
