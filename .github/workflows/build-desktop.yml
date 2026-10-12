@@ -55,12 +55,40 @@ jobs:
         shell: pwsh
         run: |
           $exe = "dist\MediaGrab\MediaGrab.exe"
-          $p = Start-Process -FilePath $exe -ArgumentList "--no-browser","--port","8099" -PassThru
-          Start-Sleep -Seconds 20
+          $out = "$env:RUNNER_TEMP\mediagrab.out.log"
+          $err = "$env:RUNNER_TEMP\mediagrab.err.log"
+          # Capture the child's streams. Without redirection a windowed
+          # PyInstaller build writes its failure nowhere, and a startup crash
+          # looks identical to a slow start.
+          $p = Start-Process -FilePath $exe `
+            -ArgumentList "--no-browser","--no-native","--port","8099" `
+            -RedirectStandardOutput $out -RedirectStandardError $err -PassThru
+
+          # Poll rather than sleep-and-hope, mirroring the Linux step. A cold
+          # Windows runner unpacks a large onedir bundle and imports yt-dlp,
+          # which can outlast a fixed sleep.
+          $ok = $false
+          for ($i = 0; $i -lt 60; $i++) {
+            if ($p.HasExited) { break }
+            try {
+              $r = Invoke-WebRequest -Uri "http://127.0.0.1:8099/api/capabilities" `
+                -UseBasicParsing -TimeoutSec 5
+              if ($r.StatusCode -eq 200 -and $r.Content -match '"desktop"') { $ok = $true; break }
+            } catch { }
+            Start-Sleep -Seconds 1
+          }
+
+          if (-not $ok) {
+            Write-Host "---- stdout ----"
+            if (Test-Path $out) { Get-Content $out }
+            Write-Host "---- stderr ----"
+            if (Test-Path $err) { Get-Content $err }
+            if ($p.HasExited) { Write-Host "Process exited with code $($p.ExitCode)" }
+            else { Write-Host "Process still running but never served /api/capabilities" }
+            throw "Windows backend failed to start"
+          }
+
           try {
-            $r = Invoke-WebRequest -Uri "http://127.0.0.1:8099/api/capabilities" -UseBasicParsing -TimeoutSec 10
-            if ($r.StatusCode -ne 200) { throw "Backend returned $($r.StatusCode)" }
-            if ($r.Content -notmatch '"desktop"') { throw "Unexpected capabilities payload" }
             # Proves yt-dlp's dynamically-imported extractors survived freezing,
             # which is the classic PyInstaller failure for yt-dlp.
             $i = Invoke-WebRequest -Uri "http://127.0.0.1:8099/api/info" -Method POST `
