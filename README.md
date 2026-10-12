@@ -105,6 +105,39 @@ MEDIAGRAB_MODE=hosted BEHIND_PROXY=true uv run uvicorn app.main:app --port 8000
 
 Enable guardrails, zero retention, and the native-app promo strip.
 
+### Public exposure
+
+Freestyle VMs have no public IP, so the app needs an ingress path to be
+reachable. Two options:
+
+**A `*.style.dev` subdomain (recommended).** Free, permanent, with a
+platform-managed wildcard certificate — no DNS records, no verification, and
+no tunnel process to keep alive:
+
+```bash
+npx freestyle@latest tls create \
+  --domain mediagrab.style.dev \
+  --from public \
+  --to vm=<vm-id>,port=8000
+```
+
+The service must listen on `0.0.0.0`, not just `localhost`, or the edge cannot
+reach it. `deploy/mediagrab.service` already does. To stop serving traffic,
+delete the rule — the name stays claimed and can be re-routed later.
+
+**A Cloudflare quick tunnel.** No account needed, but the hostname is **random
+and changes on every restart**, which breaks any shared link. Treat it as a
+local debugging aid only:
+
+```bash
+ENABLE_TUNNEL=1 bash deploy/provision.sh
+```
+
+Whichever you choose, set `BEHIND_PROXY=true` so the client IP is resolved from
+`CF-Connecting-IP`/`X-Forwarded-For` rather than the socket peer. Behind an
+ingress edge every visitor otherwise shares one address, which collapses the
+per-IP concurrency limit into a global one.
+
 ### Documentation
 
 | Document | Purpose |
