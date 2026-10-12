@@ -103,6 +103,41 @@ A cross-platform control test also established that **only YouTube is affected**
 
 **Decision #19 — copy stays truthful.** The notice says *"most links won't work here"*, not *"unavailable"*. Under the circuit breaker some links genuinely do work, and overclaiming is the fastest way to lose a user's trust when they verify elsewhere.
 
+### 1.6 Desktop Save Destination
+
+The desktop app and the hosted site had two different answers to "where does
+the file go?", which surfaced as two buttons doing two different things. The
+ready screen opened the OS folder (§1.3 Decision #14, because the file is
+already written server-side) while the history list offered an HTTP download
+that produced a second copy somewhere else entirely.
+
+**Decision #20 — one destination on desktop.** Desktop writes straight to the
+user's Downloads folder and both the ready button and every history row reveal
+that folder. Hosted is unchanged: the file lives only on the server, so the
+primary action is a download that starts the purge clock. The distinction is
+now stated in the copy — history rows read "saved to your Downloads folder" on
+desktop and "gone in <window>" on hosted.
+
+**Decision #21 — the Downloads folder is the user's, never the app's.**
+`configure_downloads_dir()` imported `app.config` before setting
+`MEDIA_GRAB_DOWNLOADS_DIR`, which executed the module-level default and cached
+it. In the frozen bundle that default is `_internal/downloads`, so every
+desktop download landed inside the app itself while the launcher reported the
+real folder. Nothing was ever deleted — desktop retention is off by design —
+but re-extracting the build orphaned the files. The launcher no longer imports
+`app.config` to resolve its override.
+
+**Decision #22 — no retention language on desktop.** The sidebar and drawer
+described a purge window in both modes. Hosted has one; desktop has none.
+Desktop now says so rather than describing a policy that does not exist.
+
+**Decision #23 — controls that cannot act are hidden, not disabled.** The
+"Open Downloads folder" button renders in desktop only: `/api/open-folder`
+answers 404 on hosted, and a visible control that visibly does nothing is
+worse than no control. The "Embed in the MP4" switch is likewise hidden in
+Audio mode, preserving the user's preference across a round trip rather than
+clearing it silently.
+
 ---
 
 ## 2. Ecosystem Architecture
