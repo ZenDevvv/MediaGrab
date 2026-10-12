@@ -822,3 +822,60 @@ def test_main_binds_streams_before_starting_the_server():
     guard = source.index("_ensure_standard_streams()", source.index("def main"))
     server = source.index("start_server(args.port)", source.index("def main"))
     assert guard < server, "streams must be bound before uvicorn is imported"
+
+
+# --- Diagnosable windowed startup -----------------------------------------
+# A windowed failure used to be invisible: the launcher printed to a discarded
+# stream, and an exception on the backend thread was swallowed by the threading
+# machinery. The user saw only "127.0.0.1 refused to connect".
+
+def test_launcher_log_goes_to_a_file_not_the_null_device(monkeypatch, tmp_path):
+    module = _load_run_desktop()
+    monkeypatch.setattr(module, "launcher_log_path", lambda: tmp_path / "launcher.log")
+    original = (sys.stdout, sys.stderr, sys.stdin)
+    try:
+        sys.stdout = sys.stderr = sys.stdin = None
+        path = module._ensure_standard_streams()
+        assert path is not None, "must open a real log, not devnull"
+        assert path.name == "launcher.log"
+        # The banner lands in the file, so a user can recover it after a crash.
+        sys.stdout.write("probe\n")
+        sys.stdout.flush()
+        assert "probe" in path.read_text(encoding="utf-8")
+        assert "launcher started" in path.read_text(encoding="utf-8")
+    finally:
+        sys.stdout, sys.stderr, sys.stdin = original
+
+
+def test_ensure_streams_leaves_a_real_console_untouched(monkeypatch, tmp_path):
+    """Running from a terminal must still print to that terminal."""
+    module = _load_run_desktop()
+    monkeypatch.setattr(module, "launcher_log_path", lambda: tmp_path / "launcher.log")
+    original = (sys.stdout, sys.stderr, sys.stdin)
+    try:
+        assert module._ensure_standard_streams() is None
+        assert (sys.stdout, sys.stderr, sys.stdin) == original
+        assert not (tmp_path / "launcher.log").exists()
+    finally:
+        sys.stdout, sys.stderr, sys.stdin = original
+
+
+def test_fatal_startup_reports_instead_of_opening_a_dead_window():
+    root = Path(__file__).resolve().parent.parent
+    source = (root / "run_desktop.py").read_text(encoding="utf-8")
+
+    # A reachability check must precede launch(); otherwise the window opens on
+    # a dead backend and shows a browser error page.
+    check = source.index("Backend confirmed reachable")
+    window = source.index("return launch(url")
+    assert check < window
+    assert "_report_fatal" in source
+
+
+def test_watchdog_logs_backend_liveness_transitions():
+    root = Path(__file__).resolve().parent.parent
+    source = (root / "run_desktop.py").read_text(encoding="utf-8")
+    assert "backend thread has exited" in source
+    assert "UNREACHABLE" in source
+    # Distinguishes a dead backend from a window that cannot route loopback.
+    assert "_watch_backend" in source

@@ -18,6 +18,7 @@ import subprocess
 import sys
 import threading
 import time
+import traceback
 import webbrowser
 from pathlib import Path
 from typing import Optional
@@ -32,7 +33,84 @@ os.environ.setdefault("RETENTION_ENABLED", "false")
 os.environ.setdefault("USER_FACING_FILENAMES", "true")
 
 
-def _ensure_standard_streams() -> None:
+def _watch_backend(url: str, server, thread, stop: threading.Event) -> None:
+    """Record backend liveness while the window is open.
+
+    Two very different failures both surface as "127.0.0.1 refused to connect"
+    in the app window: the backend thread dying, or the webview honouring a
+    system proxy that refuses loopback. Only the first is visible from Python,
+    so poll and log every alive/dead transition with a timestamp. If the log
+    shows the backend stayed up, the window's problem is the proxy, not us.
+    """
+    import httpx
+
+    alive = None
+    while not stop.wait(3.0):
+        if not thread.is_alive():
+            print("[MediaGrab] watchdog: backend thread has exited")
+            return
+        try:
+            ok = httpx.get(url, timeout=2.0).status_code == 200
+        except Exception:
+            ok = False
+        if ok != alive:
+            alive = ok
+            stamp = time.strftime("%H:%M:%S")
+            print(f"[MediaGrab] {stamp} backend {'reachable' if ok else 'UNREACHABLE'}")
+
+
+def _report_fatal(log_path: Optional[Path], message: str) -> None:
+    """Explain a startup failure in a window, not just the log.
+
+    A desktop app that fails should say so. Without this the only symptom is
+    an app window showing the browser's connection error, which tells the user
+    nothing about MediaGrab at all.
+    """
+    print(f"[MediaGrab] {message}")
+    if sys.platform == "win32":
+        try:
+            import ctypes
+
+            ctypes.windll.user32.MessageBoxW(0, message, "MediaGrab", 0x10)
+            return
+        except Exception:
+            pass
+    try:
+        import webbrowser
+
+        webbrowser.open("about:blank")
+    except Exception:
+        pass
+
+
+def launcher_log_path() -> Path:
+    """Where the launcher writes its log.
+
+    A windowed build has no console, so anything written to stdout/stderr is
+    invisible to the user. Worse, an exception raised inside the server thread
+    is printed by the threading machinery to stderr and then lost, which is
+    how a dead backend could present as nothing more than a browser error page
+    inside the app window.
+    """
+    if sys.platform == "win32":
+        base = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA")
+        root = Path(base) if base else Path.home() / "AppData" / "Local"
+    else:
+        root = Path.home() / ".mediagrab"
+    return root / "MediaGrab" / "launcher.log"
+
+
+def _open_launcher_log():
+    """Open the launcher log for appending, or fall back to the null device."""
+    try:
+        path = launcher_log_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        return path, open(path, "a", encoding="utf-8", buffering=1)
+    except OSError:
+        return None, open(os.devnull, "w", encoding="utf-8")
+
+
+def _ensure_standard_streams() -> Optional[Path]:
     """Give the process real stdio even in a windowed (no-console) build.
 
     PyInstaller builds a GUI-subsystem executable on Windows because the spec
@@ -45,20 +123,30 @@ def _ensure_standard_streams() -> None:
     raises ``AttributeError: 'NoneType' object has no attribute 'isatty'``
     before the server ever binds.
 
-    Binding the streams to ``os.devnull`` restores objects that are writable
-    and ``isatty()``-able. ``isatty()`` then reports ``False``, which is the
+    Binding them to the launcher log restores objects that are writable and
+    ``isatty()``-able. ``isatty()`` then reports ``False``, which is the
     correct answer for a GUI app: uvicorn disables ANSI colouring rather than
-    emitting escape codes nobody will see. Called more than once it is a
-    no-op, and streams that already exist are never replaced.
+    emitting escape codes nobody will see. Streams that already exist are
+    never replaced, so running from a terminal still shows output there.
 
-    Must run before anything imports uvicorn or configures logging.
+    Returns the log path when a file was opened, or ``None`` if the null
+    device had to be used.
     """
+    if sys.stdout is not None and sys.stderr is not None:
+        return None
+
+    path, stream = _open_launcher_log()
     if sys.stdout is None:
-        sys.stdout = open(os.devnull, "w", encoding="utf-8")
+        sys.stdout = stream
     if sys.stderr is None:
-        sys.stderr = open(os.devnull, "w", encoding="utf-8")
+        sys.stderr = stream
     if sys.stdin is None:
         sys.stdin = open(os.devnull, "r", encoding="utf-8")
+
+    if path:
+        stamp = time.strftime("%Y-%m-%d %H:%M:%S")
+        print(f"[MediaGrab] {stamp} launcher started (no console; logging to {path})")
+    return path
 
 
 def default_downloads_dir() -> Path:
@@ -156,7 +244,21 @@ def start_server(port: int = 0) -> tuple:
         access_log=False,
     )
     server = uvicorn.Server(config)
-    thread = threading.Thread(target=server.run, daemon=True)
+
+    def _run_server() -> None:
+        # An exception here is raised on a background thread, so the threading
+        # machinery prints it to stderr and the thread simply dies. In a
+        # windowed build that output used to go nowhere, which turned a dead
+        # backend into a bare "127.0.0.1 refused to connect" page inside the
+        # app window with no explanation anywhere. Log it explicitly.
+        try:
+            server.run()
+        except BaseException:
+            traceback.print_exc()
+            print("[MediaGrab] FATAL: backend thread exited; the window will show a connection error")
+            server.startup_failed = True
+
+    thread = threading.Thread(target=_run_server, daemon=True)
     thread.start()
 
     deadline = time.time() + 30
@@ -265,7 +367,7 @@ def main() -> int:
     args = parser.parse_args()
 
     # Before start_server(), which imports uvicorn and configures logging.
-    _ensure_standard_streams()
+    log_path = _ensure_standard_streams()
 
     sys.path.insert(0, str(APP_ROOT))
 
@@ -289,9 +391,34 @@ def main() -> int:
         server.should_exit = True
         return 0
 
+    # Opening a window at a dead backend is the worst possible outcome: the
+    # user sees "127.0.0.1 refused to connect" and has no idea the app itself
+    # failed. Verify once more immediately before handing over to the GUI --
+    # the backend can die between startup and here -- and explain the failure
+    # instead of navigating to it.
+    try:
+        import httpx
+
+        if httpx.get(url, timeout=5.0).status_code != 200:
+            raise RuntimeError("backend stopped responding before the window opened")
+        print("[MediaGrab] Backend confirmed reachable")
+    except Exception as e:
+        print(f"[MediaGrab] FATAL: backend unreachable before window: {e}")
+        _report_fatal(log_path, f"MediaGrab could not start its local server.\n\n{e}\n\nDetails: {log_path}")
+        server.should_exit = True
+        return 1
+
+    stop = threading.Event()
+    watchdog = threading.Thread(
+        target=_watch_backend, args=(url, server, thread, stop), daemon=True
+    )
+    watchdog.start()
+
     try:
         return launch(url, prefer_native=not args.no_native)
     finally:
+        stop.set()
+        print("[MediaGrab] Window closed; shutting down backend")
         server.should_exit = True
         thread.join(timeout=5)
 
