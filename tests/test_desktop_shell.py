@@ -879,3 +879,17 @@ def test_watchdog_logs_backend_liveness_transitions():
     assert "UNREACHABLE" in source
     # Distinguishes a dead backend from a window that cannot route loopback.
     assert "_watch_backend" in source
+
+
+def test_browser_fallback_bypasses_the_proxy_for_loopback():
+    """A machine with a system proxy would otherwise refuse our own backend.
+
+    The windowed URL is always loopback. Edge and Chrome honour system proxy
+    settings for 127.0.0.1 unless told not to, which produces an app window
+    showing "127.0.0.1 refused to connect" while the backend is demonstrably
+    serving requests.
+    """
+    root = Path(__file__).resolve().parent.parent
+    source = (root / "run_desktop.py").read_text(encoding="utf-8")
+    assert '"--no-proxy-server"' in source
+    assert '"--proxy-bypass-list=127.0.0.1;localhost"' in source

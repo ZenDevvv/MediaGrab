@@ -331,7 +331,18 @@ def launch(url: str, prefer_native: bool = True, timeout: int = 120) -> int:
         try:
             print(f"[MediaGrab] Opening app-mode window via {chromium}...")
             proc = subprocess.Popen(
-                [chromium, f"--app={url}", "--window-size=1200,860"],
+                [
+                    chromium,
+                    f"--app={url}",
+                    "--window-size=1200,860",
+                    # The URL is always loopback. Without these, a machine with
+                    # a system proxy configured (common in VMs and corporate
+                    # images) routes 127.0.0.1 through that proxy, which then
+                    # refuses it -- the app window opens on a live backend and
+                    # still shows "127.0.0.1 refused to connect".
+                    "--no-proxy-server",
+                    "--proxy-bypass-list=127.0.0.1;localhost",
+                ],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
