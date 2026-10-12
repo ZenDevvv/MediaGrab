@@ -564,3 +564,21 @@ def test_settings_labels_do_not_uppercase_the_log_path():
     assert '<span class="mono">Version</span>' not in html
     # The path and note stay lowercase-capable.
     assert 'id="settings-log-path"' in html
+
+
+@pytest.mark.parametrize("page", ["index.html", "choose.html"])
+def test_settings_cog_is_hidden_on_hosted(page):
+    """A cog leading to a panel that can do nothing is worse than no cog."""
+    with open(f"static/{page}", "r", encoding="utf-8") as f:
+        html = f.read()
+    # Ships hidden so it cannot flash before the mode is known.
+    assert 'id="btn-settings" type="button" aria-label="Open settings" hidden' in html
+
+    with open("static/js/app.js", "r", encoding="utf-8") as f:
+        js = f.read()
+    start = js.index("async function wireSettings")
+    body = js[start:js.index("function openSettingsDrawer", start)] if "function openSettingsDrawer" in js[start:] else js[start:start + 2000]
+    # Revealed only when not hosted.
+    assert "openBtn.hidden = isHostedMode();" in body
+    # And it still works when it is shown.
+    assert "openBtn.addEventListener('click', openSettingsDrawer)" in body

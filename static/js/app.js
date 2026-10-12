@@ -436,7 +436,15 @@
     const openBtn = $('#btn-settings');
     const closeBtn = $('#btn-close-settings');
     const backdrop = $('#settings-backdrop');
-    if (openBtn) openBtn.addEventListener('click', openSettingsDrawer);
+
+    // Hosted has no local log to open and no build a user can update, so the
+    // trigger would lead to a panel that says almost nothing. Hidden rather
+    // than shown as a dead control (§1.7 Decision #23). The markup ships
+    // hidden so it never flashes before this runs.
+    if (openBtn) {
+      openBtn.hidden = isHostedMode();
+      openBtn.addEventListener('click', openSettingsDrawer);
+    }
     if (closeBtn) closeBtn.addEventListener('click', closeSettingsDrawer);
     if (backdrop) backdrop.addEventListener('click', closeSettingsDrawer);
     document.addEventListener('keydown', (e) => {
