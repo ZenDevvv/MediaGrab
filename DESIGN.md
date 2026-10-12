@@ -146,7 +146,9 @@ A strip of vertical bars in a card. Bars inside the selection use `--ink`, outsi
 Large percentage (display face), a 16px pill bar with accent fill and a hard right edge, the clip mark riding the head of the bar, three stat tiles (Speed, Left, Got) in mono, then a stage list. Stage states: done (accent circle with check), now (ringed dot), todo (muted, hollow). Stages follow the real pipeline: Read the link, Downloading, Joining into an MP4, Embedding captions, Ready.
 
 ### File card
-Icon, file name in mono (wraps anywhere), then a two-column spec list (Quality, Length, Size, Captions). Compact variant for extra files like the `.srt`. A countdown line shows when the file is deleted ("Deleted from this machine in 29:41").
+Icon, file name in mono (wraps anywhere), then a two-column spec list (Quality, Length, Size, Captions). Compact variant for extra files like the `.srt`.
+
+The deletion line beneath it is the **retention notice** below, not a static caption.
 
 ### Status blocks
 Round 56px badge plus a heading and one plain sentence.
@@ -271,3 +273,75 @@ Because colors point at CSS variables, the `[data-theme]` and `prefers-color-sch
 | Ready | yes | yes |
 | Error · bad link | yes | reuse phone pattern, centered column |
 | Error · offline | yes | reuse phone pattern, centered column |
+
+### Retention notice (`.save-notice`)
+One component, three states, because the same sentence cannot be true in all of
+them. `--card` fill, 1.5px `--edge`, 12px radius, 2px hard shadow, with a 28px
+icon chip.
+
+| State | Chip | Title (display 13px) | Body (`--muted` 12.5px) |
+|---|---|---|---|
+| `is-idle` | accent | "Ephemeral by design" | "This file is deleted from the server 60 seconds after you save. Nothing is kept here." |
+| `is-counting` | soft | "Saved to your device" + timer pill | "The server's copy is deleted when the timer ends. Your downloaded file is not affected." |
+| `is-done` | `--ok` | "Deleted from our server" | "The server's copy is gone. The file you saved is still on your device." |
+
+- **The counting frame stays neutral.** An earlier pass tinted the whole card
+  `--bad`, which reads as failure — but the save succeeded and nothing is broken.
+  Only the expiring timer carries urgency.
+- **Timer pill**: `--bad` fill with `--on-bad` text, mono, `font-variant-numeric:
+  tabular-nums`. Tabular figures are load-bearing: a proportional digit changes
+  width every tick and the jitter reads as instability rather than a countdown.
+- Desktop renders the same component with a Downloads-folder message and no
+  timer. There is no server copy to describe.
+
+### YouTube upsell card (`.yt-upsell`)
+Shown when the platform refuses this server's address. `--card` fill, 1.5px
+`--edge`, 14px radius, 3px hard shadow, 28px accent icon chip. Actions: a primary
+CTA plus a quiet "Use another site". A quiet reassurance line closes it.
+
+- **`--card` surface, not `--accent-soft`.** At card size the soft fill reads as
+  *disabled* in dark theme, where it is a dark olive. The same lesson applies to
+  the retention notice.
+- Copy is "most links won't work", never "unavailable": some links genuinely do
+  work, and overclaiming costs trust the first time a user verifies elsewhere.
+
+### Settings trigger (`.fab-settings`)
+A 40px circular `--card` chip pinned at the lower left, 18px inset, 1.5px
+`--edge`, 2px hard shadow. Hover shifts 1px up-left and deepens the shadow; active
+returns it.
+
+- Ships **hidden**, revealed once the mode is known. On hosted there is no local
+  log to open and no build a user can update, so the control would lead to a
+  panel that can only say so.
+- Anchored left because the panel it opens is anchored left. Opening a
+  right-hand drawer from a left-hand control is disorienting.
+
+### Settings drawer
+Mirrors the "Your files" panel: 420px, backdrop, slide transition, `Esc` to
+close. The left-anchored variant is `.drawer-panel-left`: it flips
+`right: 0` to `left: 0`, swaps the border, and enters from `translateX(-100%)`
+instead of `translateX(100%)`.
+
+Contents are grouped cards (`--card`, 1.5px `--line`, 16px radius) with a
+`.settings-label` eyebrow, a hint paragraph, and actions.
+
+- **Only the label is uppercased.** A blanket `.mono` rule once uppercased the
+  log *path* too, which is a path you cannot paste back in.
+- Status lines carry a tone: `--ok` for success, `--bad` for failure, `--muted`
+  for neutral. They are the only place in the UI that reports an action's result
+  without a toast.
+
+### History rows (`.frow`)
+28px icon, mono filename with ellipsis, a mono detail line, and a trailing
+action. The detail line states the retention policy that actually applies:
+*"saved to your Downloads folder"* on desktop, *"gone in 60s"* on hosted. It was
+hardcoded to *"gone in 30:00"* once, which was wrong in both modes.
+
+The row container uses `align-content: start` — without it, rows stretch to fill
+the tall drawer and drift far apart.
+
+### Icon sizing
+`.ico` declares **both** `width` and `height`. An SVG without intrinsic
+dimensions defaults to 100% of its container, which once rendered the retention
+clock at roughly 230px inside a one-line notice. Contexts needing another size
+override with a more specific `... svg` rule (`.icon-btn`, `.status-badge`).

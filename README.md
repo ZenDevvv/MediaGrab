@@ -22,7 +22,15 @@ Runs three ways from one codebase: a **hosted web instance** with guardrails and
 
 ## Desktop App
 
-> **Status:** The Linux build is verified working. Windows is built by CI but **not yet manually verified** — no claims are made about it until someone runs it.
+> **Status:** Both the Linux and Windows builds are verified working. The Windows build has been run end to end on a real Windows machine: the app launches, and Facebook and YouTube downloads both complete.
+>
+> That run was worth more than the confirmation. It exposed five defects that no
+> Linux test or CI job could reach — a GUI-subsystem build leaving `sys.stdout`
+> as `None`, a browser handing off and causing the launcher to kill its own
+> backend, downloads landing inside the app bundle, `CSIDL_PROFILE` used where
+> `CSIDL_DOWNLOADS` was meant, and post-processed output that could not be
+> located. CI now performs a real download and a no-console launch so that class
+> of failure cannot ship again. See `ARCHITECTURE.md` §13 for the full list.
 
 ### Build from source
 
@@ -146,6 +154,7 @@ per-IP concurrency limit into a global one.
 | [`ARCHITECTURE.md`](./ARCHITECTURE.md) | How the system works as built: components, request lifecycle, retention, security |
 | [`MULTI_PLATFORM_IMPLEMENTATION_PLAN.md`](./MULTI_PLATFORM_IMPLEMENTATION_PLAN.md) | Ambiguity-gate decisions (§1–§1.4) and milestone roadmap |
 | [`DESIGN.md`](./DESIGN.md) | Visual design system and tokens |
+| [`docs/OPERATIONS.md`](./docs/OPERATIONS.md) | Deploy, release, and incident runbook |
 
 > **Working with this codebase:** read `PRD.md` and `ARCHITECTURE.md` first.
 > `MULTI_PLATFORM_IMPLEMENTATION_PLAN.md` §1 records *why* decisions were made —

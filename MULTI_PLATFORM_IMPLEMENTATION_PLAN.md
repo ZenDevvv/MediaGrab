@@ -40,6 +40,12 @@ Implementation notes:
 - `SESSION_SECRET` is HMAC-keyed. When unset, a per-process key is generated and a warning is logged; sessions then reset on restart, which is acceptable for a fairness device and preferable to a hardcoded key.
 - Desktop mode issues no cookie: it is per-user and uncapped, so a cookie would be pointless state.
 
+**Decision #3 — the retention clock starts at retrieval, not completion.** A hosted file is deleted 60 seconds after the user's first `GET /api/file`, not 60 seconds after the job became ready. The original 5-minute post-*serve* rule and a post-completion timer were both wrong in the same way: both can elapse while the user is still sitting on the ready screen, deleting a file they have not saved yet. The purge is therefore scheduled from the retrieval handler alone (`cleaner.deferred_file_removal`), and unclaimed files are exempt from the orphan watchdog regardless of mtime. Desktop disables the whole mechanism — sweeping the user's own Downloads folder is the single most dangerous footgun in this codebase.
+
+**Decision #5 — the duration cap is clip-aware.** A trimmed request produces only the trimmed segment, so the 60-minute cap is evaluated against `metadata.resolve_duration()` rather than the source duration. This is what makes trimming a genuine remedy for a long video rather than a cosmetic control: without it, a 3-hour source could never be downloaded no matter how short the user's clip.
+
+**Decision #6 — abort is cooperative cancellation plus a purge.** yt-dlp runs in a thread executor and cannot be hard-killed, so `POST /api/abort` sets an event that the progress hook observes at its next tick, then purges exactly what that job wrote. On desktop the per-job staging directory makes this precise — it can never touch a concurrent job's fragments. An earlier attempt bounded a `*.part` sweep by mtime; that deleted concurrent downloads, because both are written at the same instant.
+
 **Decision #7 added — Android size budget corrected.** The ~42 MB figure was not achievable. The `youtubedl-android:library` AAR is 56.5 MB and the FFmpeg AAR adds further weight; only `arm64-v8a` is shipped, and native libraries install uncompressed to disk. Budget **90–120 MB APK, ~250–350 MB installed**. Release notes and the store listing must state this honestly rather than promising a 42 MB download.
 
 **Additional M1 findings folded into the spec:**
@@ -74,7 +80,20 @@ M3's "save directly to `~/Downloads`" requirement collides with retention code t
 
 **Decision #14 — desktop suppresses the browser save.** With a server-side write, the frontend must not also navigate to `/api/file/{job_id}`, or the file is written twice. Desktop mode branches on the existing `mg-mode` tag: no navigation, and the ready screen shows *"Saved to Downloads"* with an **Open in Folder** action. Hosted keeps its current browser-driven save.
 
-**Verification scope:** the Windows `.exe` cannot be executed from the Linux build host, so M3 is verified on Linux only. The PyInstaller spec and GitHub Actions workflow are delivered unproven; the maintainer has a Windows VM and verifies manually. No claim of Windows correctness is made without that run.
+**Verification scope (superseded):** M3 originally shipped verified on Linux only, with the Windows build explicitly unproven. That run has now happened on the maintainer's Windows VM: the app launches, and Facebook and YouTube downloads both complete. Windows is no longer an unverified claim.
+
+The verification was worth more than the confirmation itself — it exposed five defects no Linux or CI test could reach, each of which had shipped in a released build:
+
+| Defect | Why only a real run found it |
+|---|---|
+| GUI-subsystem build leaves `sys.stdout` as `None`; the app could not start at all | CI redirects stdio, so `sys.stdout` is never `None` |
+| Browser handed off to a running instance; launcher killed its own backend | CI has no browser instance to hand off to |
+| Downloads landed in `_internal/downloads` instead of the user's folder | Invisible until a real Downloads folder exists to compare against |
+| `CSIDL_PROFILE` (0x28) instead of `CSIDL_DOWNLOADS` (0x05) | Windows shell API, never exercised off-Windows |
+| Post-processed output could not be located | CI ran no real download |
+
+The response was structural, not just a set of fixes: CI now performs a real
+download and a no-console launch (§1.7 Decisions #27).
 
 ### 1.4 Milestone 5 Gate (Hosted Deployment)
 
@@ -139,6 +158,72 @@ answers 404 on hosted, and a visible control that visibly does nothing is
 worse than no control. The "Embed in the MP4" switch is likewise hidden in
 Audio mode, preserving the user's preference across a round trip rather than
 clearing it silently.
+
+### 1.7 Settings, Diagnostics & Release Trust
+
+A support request is only actionable if the user can hand over evidence. Until
+this section existed the launcher wrote its internals to a stream it had itself
+discarded, so a windowed failure produced no artifact at all — the user had
+nothing to send and we had nothing to reason from.
+
+**Decision #24 — the settings surface is a left-anchored drawer.** A floating cog
+at the lower left of both screens, opening a panel that mirrors the existing
+`.drawer-panel` pattern rather than introducing a route. The trigger is on the
+left because the panel is; opening a right-hand drawer from a left-hand control
+is disorienting.
+
+**Decision #25 — diagnostics offer two routes to the same file.** *Open log file*
+reveals `launcher.log` in the OS editor; *Copy to clipboard* puts the tail on the
+clipboard for pasting directly into a report. Only the tail is transferred: the
+file grows without bound and a failure is always at the end. The clipboard action
+falls back to `execCommand`, because a packaged app may not hold clipboard
+permission and the whole point is that this always works.
+
+The log path is defined once, in `app/services/logpaths`, shared by the launcher
+that writes it and the panel that reveals it. Two copies would drift and the panel
+would open the wrong file — the failure would look like the bug is back.
+
+**Decision #26 — update checks compare a real version.** An update check is
+meaningless without knowing what is running, and nothing tracked a version:
+`app/main.py` carried a stale hardcoded `1.0.0` while releases were at `0.1.x`.
+`APP_VERSION` is stamped from the tag at package time and reported through
+`/api/capabilities`. A `dev` build skips the comparison and says so rather than
+reporting a development build against a production release.
+
+Two details that are easy to get wrong:
+
+- **A failed check must not look like "no update".** If GitHub cannot be reached
+  the endpoint answers `503` and the panel says it could not tell. Silently
+  reporting "up to date" would be the more comfortable lie and the more dangerous
+  one.
+- **Unparseable tags sort lowest, never highest.** A malformed release must not
+  be able to tell a current user to update.
+
+**Decision #27 — releases are published only after verification.** Build jobs
+upload artifacts; a single `publish` job with `needs: [windows, linux]` creates the
+release and refuses to publish if any expected asset is missing. This exists
+because v0.1.0 published a Linux-only release: each build job created the release
+itself, so the Linux job shipped while the Windows job failed, and nobody had to
+be told — the download button simply pointed at a build that could not start.
+
+Two smoke tests were added at the same time, each covering a class of failure
+the previous suite was structurally unable to see:
+
+- **A no-console launch.** The original smoke test used `Start-Process` with
+  redirection, which hands the child real file handles — so `sys.stdout` is never
+  `None` and the windowed-stdio crash cannot occur under test. The new step
+  launches with no redirection at all, which is what a double-click produces.
+- **A real download**, served from a committed fixture over a local HTTP server.
+  Startup tests passed happily through three releases in which *every* desktop
+  download failed. The first version of this test used YouTube and failed for
+  reasons unrelated to the code, because CI addresses trip the same bot check; a
+  gate that fails for unrelated reasons is not a gate.
+
+**Decision #28 — desktop-only surfaces are hidden on hosted.** The settings
+trigger, the diagnostics group and the update group all ship `hidden` in the markup
+and are revealed after the mode is known. Hidden rather than disabled, and hidden
+*before* JavaScript runs so they never flash on the public site — the same
+fail-closed pattern as the hosted promo strip.
 
 ---
 
@@ -409,13 +494,13 @@ flowchart LR
 8. Suppress generic PWA prompts across hosted mode; ensure iOS Safari is clean.
 9. Update Playwright/DOM tests in `tests/test_ui_dom.py`.
 
-### Milestone 3: Desktop App Shell & Packaging
-1. Build `run_desktop.py` with port discovery, direct `~/Downloads` target, and WebKitGTK / Chrome `--app` fallback.
-2. Build PyInstaller spec file in `packaging/MediaGrab.spec`.
-3. Create `.github/workflows/build-desktop.yml` for Windows `.exe` and Linux release builds.
-4. Verify execution on Linux.
+### Milestone 3: Desktop App Shell & Packaging — ✅ complete
+1. Build `run_desktop.py` with port discovery, direct `~/Downloads` target, and WebKitGTK / Chrome `--app` fallback. **Done**, extended with the windowed-stdio guard and the window-lifetime fixes in §1.7 and `ARCHITECTURE.md` §7.
+2. Build PyInstaller spec file in `packaging/MediaGrab.spec`. **Done**, including the dynamic `pythonnet`/`clr_loader` collection that static analysis misses.
+3. Create `.github/workflows/build-desktop.yml` for Windows `.exe` and Linux release builds. **Done**, with the release gated on verification (§1.7 Decision #27) and version stamped from the tag.
+4. Verify execution on Linux **and on Windows**. **Done** — see the superseded verification-scope note in §1.3.
 
-### Milestone 4: Standalone Android App (`android/`)
+### Milestone 4: Standalone Android App (`android/`) — ⏭ next
 1. Initialize `android/` project structure with Gradle wrapper and AndroidManifest, `arm64-v8a` only.
 2. Integrate `youtubedl-android` + FFmpeg, and bundle the web assets into APK assets.
 3. Implement embedded Ktor micro-server (**CIO engine**) bridging `/api/` calls to `YoutubeDL` **and** serving the bundled web assets.

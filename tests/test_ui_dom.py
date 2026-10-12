@@ -582,3 +582,164 @@ def test_settings_cog_is_hidden_on_hosted(page):
     assert "openBtn.hidden = isHostedMode();" in body
     # And it still works when it is shown.
     assert "openBtn.addEventListener('click', openSettingsDrawer)" in body
+
+
+# --- Documentation stays true of the code (§ doc alignment) ---------------
+
+DOCS = ["README.md", "ARCHITECTURE.md", "PRD.md", "DESIGN.md",
+        "MULTI_PLATFORM_IMPLEMENTATION_PLAN.md", "docs/OPERATIONS.md"]
+
+
+def test_every_companion_document_exists():
+    import pathlib
+    root = pathlib.Path(__file__).resolve().parent.parent
+    for doc in DOCS:
+        assert (root / doc).exists(), f"{doc} is referenced but missing"
+
+
+def test_section_and_decision_references_resolve():
+    """Code must not point at sections or decisions nobody wrote.
+
+    §1.7 was cited from routes.py, run_desktop.py, the DOM and two test files
+    while existing only as a code comment -- the section itself was missing.
+
+    A §reference resolves against the document named immediately before it, else
+    against the citing document, else against the implementation plan, which is
+    the canonical decision record and is legitimately cited from anywhere.
+    """
+    import pathlib
+    import re
+
+    root = pathlib.Path(__file__).resolve().parent.parent
+    plan = (root / "MULTI_PLATFORM_IMPLEMENTATION_PLAN.md").read_text()
+    plan_sections = set(re.findall(r"^#{2,4} (\d+(?:\.\d+)?)\b", plan, re.M))
+
+    cache = {}
+    def sections_of(doc: pathlib.Path) -> set:
+        if doc not in cache:
+            try:
+                cache[doc] = set(re.findall(
+                    r"^#{2,4} (\d+(?:\.\d+)?)\b", doc.read_text(encoding="utf-8"), re.M))
+            except (UnicodeDecodeError, OSError):
+                cache[doc] = set()
+        return cache[doc]
+
+    decision_refs = set()
+    for path in root.rglob("*"):
+        if path.suffix not in {".py", ".js", ".html", ".yml", ".md"}:
+            continue
+        # Build output and vendored dependencies are not source. A vendored
+        # yt-dlp file contains a stray section-sign sequence that looks like a
+        # citation but is not one.
+        if any(part in {".git", "node_modules", ".venv", "dist", "build", "venv"}
+               for part in path.parts):
+            continue
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+
+        decision_refs.update(re.findall(r"Decision #(\d+)", text))
+
+        for match in re.finditer(r"(?:([\w./-]+\.md)[\s`]*)?§(\d+(?:\.\d+)?)", text):
+            named, section = match.group(1), match.group(2)
+            if named:
+                target = root / named
+                assert target.exists(), f"{path.name} cites {named}, which does not exist"
+                assert section in sections_of(target), (
+                    f"{path.name} cites {named} §{section}, which {named} does not define"
+                )
+            else:
+                assert (section in sections_of(path)
+                        or section in plan_sections), (
+                    f"{path.name} cites §{section}, defined in neither that document "
+                    f"nor the implementation plan"
+                )
+
+    defined = set(re.findall(r"\*\*Decision #(\d+)", plan))
+    missing = decision_refs - defined
+    assert not missing, f"cited but never recorded in the plan: {sorted(missing, key=int)}"
+
+
+def test_architecture_states_no_longer_false_claims():
+    import pathlib
+    root = pathlib.Path(__file__).resolve().parent.parent
+    arch = (root / "ARCHITECTURE.md").read_text()
+    readme = (root / "README.md").read_text()
+
+    # Windows is now manually verified.
+    assert "not yet manually verified" not in readme
+    assert "nobody has run it" not in arch
+
+    # Releases are published.
+    assert "No published releases" not in arch
+    # And per-platform availability replaced the all-or-nothing switch.
+    assert "DOWNLOADS_PUBLISHED" in arch
+
+
+def test_env_example_documents_every_public_setting():
+    """A setting that exists but is undocumented is one nobody can find."""
+    import re
+    from app import config
+
+    root = Path(__file__).resolve().parent.parent
+    example = root / ".env.example"
+    text = example.read_text()
+    documented = set(re.findall(r"^([A-Z][A-Z0-9_]*)=", text, re.M))
+
+    # Settings a deployer may plausibly need to change.
+    for name in (
+        "DOWNLOADS_AVAILABLE",
+        "DOWNLOADS_PUBLISHED",
+        "GITHUB_RELEASES_URL",
+        "MEDIA_GRAB_YOUTUBE_COOLDOWN_SECONDS",
+        "MEDIA_GRAB_VERSION",
+        "MEDIA_GRAB_GITHUB_REPO",
+        "BEHIND_PROXY",
+        "SESSION_SECRET",
+    ):
+        assert name in documented, f"{name} is not in .env.example"
+        # Read somewhere in the app -- config for most, but a few (download
+        # targets) are owned by a service module instead.
+        read_somewhere = hasattr(config, name) or any(
+            name in f.read_text(encoding="utf-8")
+            for f in (root / "app").rglob("*.py")
+        )
+        assert read_somewhere, f"{name} is documented but nothing reads it"
+
+
+def test_design_system_documents_the_new_components():
+    import pathlib
+    root = pathlib.Path(__file__).resolve().parent.parent
+    design = (root / "DESIGN.md").read_text()
+    css = (root / "static" / "css" / "app.css").read_text()
+
+    for component, selector in (
+        ("retention notice", ".save-notice"),
+        ("YouTube upsell", ".yt-upsell"),
+        ("settings trigger", ".fab-settings"),
+        ("history rows", ".frow"),
+    ):
+        assert component.lower() in design.lower(), f"{component} is undocumented"
+        assert selector in css, f"{selector} no longer exists"
+
+    # Components that only exist in code would be silently un-kept.
+    assert ".drawer-panel-left" in css
+    assert "drawer-panel-left" in design
+
+
+def test_prd_status_table_is_current():
+    """A requirement table is only useful while its status is true."""
+    import re
+    from pathlib import Path
+
+    prd = (Path(__file__).resolve().parent.parent / "PRD.md").read_text()
+
+    # Windows verification happened; the row must not still claim otherwise.
+    n7 = next(l for l in prd.splitlines() if l.startswith("| N7"))
+    assert "Not met" not in n7, "N7 still claims Windows is unverified"
+
+    # The test count must not be a stale number.
+    n4 = next(l for l in prd.splitlines() if l.startswith("| N4"))
+    counts = set(re.findall(r"(\d+)\s+tests", prd))
+    assert len(counts) == 1, f"PRD quotes conflicting test counts: {counts}"

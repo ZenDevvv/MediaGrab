@@ -104,7 +104,7 @@ migration path between them.
 | ID | Requirement | Verified by |
 |---|---|---|
 | D1 | Unlimited resolution, duration, and size | no guardrails applied |
-| D2 | Save directly to `~/Downloads`, bare filename, auto-deduped | `USER_FACING_FILENAMES` |
+| D2 | Save directly to the OS Downloads folder, bare filename, auto-deduped | `USER_FACING_FILENAMES`; folder resolution verified in `logpaths` ordering |
 | D3 | Never delete user files | `RETENTION_ENABLED=false` |
 | D4 | Zero configuration; no env vars, no prompts | launcher defaults |
 | D5 | Window fallback chain if the native window cannot open | launcher |
@@ -119,10 +119,10 @@ migration path between them.
 | N1 | No database | Met — in-memory jobs, `localStorage` history |
 | N2 | No frontend build step | Met — vanilla ES6 |
 | N3 | Guardrails not spoofable | Met — server-computed from own metadata |
-| N4 | Test suite green in both modes | Met — 124 tests |
+| N4 | Test suite green in both modes | Met — 230 tests |
 | N5 | Real-browser UI coverage | Met — headless Chromium via CDP |
 | N6 | < 1 s local page load | Unmeasured |
-| N7 | Windows binary verified | **Not met** — pending maintainer test |
+| N7 | Windows binary verified | **Met** — run end to end on a real Windows machine; Facebook and YouTube downloads both complete |
 | N8 | Licence obligations satisfied before public distribution | **Not met** — GPL-3.0 FFmpeg unresolved |
 
 ---
