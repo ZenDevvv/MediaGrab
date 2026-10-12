@@ -893,3 +893,41 @@ def test_browser_fallback_bypasses_the_proxy_for_loopback():
     source = (root / "run_desktop.py").read_text(encoding="utf-8")
     assert '"--no-proxy-server"' in source
     assert '"--proxy-bypass-list=127.0.0.1;localhost"' in source
+
+
+# --- App-mode window lifetime (§ v0.1.3 diagnosis) -------------------------
+# The launcher log from the user's Windows VM showed the backend reachable for
+# the whole run, followed immediately by "Window closed; shutting down
+# backend". Chromium and Edge hand a new launch off to an already-running
+# instance and exit at once, so proc.wait() returned while the window was
+# still open and the caller tore the backend out from under it.
+
+def test_browser_uses_a_dedicated_profile_so_it_cannot_hand_off():
+    root = Path(__file__).resolve().parent.parent
+    source = (root / "run_desktop.py").read_text(encoding="utf-8")
+    assert "--user-data-dir=" in source, (
+        "without a private profile the browser delegates to a running instance"
+    )
+    # First-run prompts can swallow the window and exit.
+    assert "--no-first-run" in source
+    assert "--no-default-browser-check" in source
+
+
+def test_window_lifetime_is_not_capped_by_a_fixed_timeout():
+    """A two-minute cap tears the backend down mid-download."""
+    root = Path(__file__).resolve().parent.parent
+    source = (root / "run_desktop.py").read_text(encoding="utf-8")
+    start = source.index("def launch(")
+    body = source[start:source.index("def main(", start)]
+    assert "proc.wait(timeout=" not in body, "window must live until the user closes it"
+    assert "while True:" in body and "keeping the backend alive" in body, (
+        "a browser that hands off must not stop the backend"
+    )
+
+
+def test_pythonnet_is_bundled_for_the_native_window():
+    """pywebview imports pythonnet dynamically, so PyInstaller cannot see it."""
+    spec = (Path(__file__).resolve().parent.parent / "packaging" / "MediaGrab.spec").read_text()
+    assert '"pythonnet"' in spec
+    assert '"clr_loader"' in spec
+    assert '"clr"' in spec

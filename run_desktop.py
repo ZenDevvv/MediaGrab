@@ -329,12 +329,25 @@ def launch(url: str, prefer_native: bool = True, timeout: int = 120) -> int:
     chromium = find_chromium()
     if chromium:
         try:
+            # A dedicated profile directory is required, not cosmetic. Chromium
+            # and Edge hand a new launch off to an already-running instance and
+            # exit immediately; if that happens here, proc.wait() returns while
+            # the window is still open, the caller tears the backend down, and
+            # the live window reports "127.0.0.1 refused to connect". A private
+            # profile forces a separate process that owns the window.
+            profile = launcher_log_path().parent / "browser-profile"
+            profile.mkdir(parents=True, exist_ok=True)
             print(f"[MediaGrab] Opening app-mode window via {chromium}...")
             proc = subprocess.Popen(
                 [
                     chromium,
                     f"--app={url}",
                     "--window-size=1200,860",
+                    f"--user-data-dir={profile}",
+                    # Skip first-run and default-browser prompts, which can
+                    # otherwise swallow the window and exit.
+                    "--no-first-run",
+                    "--no-default-browser-check",
                     # The URL is always loopback. Without these, a machine with
                     # a system proxy configured (common in VMs and corporate
                     # images) routes 127.0.0.1 through that proxy, which then
@@ -346,12 +359,24 @@ def launch(url: str, prefer_native: bool = True, timeout: int = 120) -> int:
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
-            # The window lives as long as the user keeps it open; we block here
-            # so the Python process stays alive as its owner.
-            proc.wait(timeout=timeout)
-            return 0
-        except subprocess.TimeoutExpired:
-            print("[MediaGrab] Window closed after timeout.")
+
+            # Detect hand-off: the process exits within seconds while a window
+            # may still be open elsewhere. Serving must not stop in that case.
+            deadline = time.monotonic() + 6
+            while time.monotonic() < deadline and proc.poll() is None:
+                time.sleep(0.25)
+            if proc.poll() is not None:
+                print(
+                    "[MediaGrab] Browser handed off to a running instance; "
+                    "keeping the backend alive so the window keeps working"
+                )
+                while True:
+                    time.sleep(1)
+
+            # The window owns this process: wait until the user closes it. A
+            # fixed timeout used to tear the backend down after two minutes
+            # while the window was still open and downloading.
+            proc.wait()
             return 0
         except Exception as e:
             print(f"[MediaGrab] App-mode window failed ({e}); falling back.")

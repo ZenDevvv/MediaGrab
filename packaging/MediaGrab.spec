@@ -25,7 +25,12 @@ block_cipher = None
 # yt-dlp pulls in optional extractors dynamically; PyInstaller's static analysis
 # misses them, which produces runtime ImportErrors for less common sites.
 datas, binaries, hiddenimports = [], [], []
-for package in ("yt_dlp",):
+# pythonnet is a Windows-only dependency that pywebview imports dynamically
+# through clr_loader, so PyInstaller cannot discover it statically. Left
+# uncollected, the frozen Windows build fails at startup with "Failed to
+# resolve Python.Runtime.Loader.Initialize from .../pythonnet/runtime/
+# Python.Runtime.dll" and silently falls back to a browser window.
+for package in ("yt_dlp", "pythonnet", "clr_loader"):
     try:
         d, b, h = collect_all(package)
         datas += d
@@ -36,6 +41,8 @@ for package in ("yt_dlp",):
 
 hiddenimports += collect_submodules("uvicorn")
 hiddenimports += [
+    "clr",
+    "clr_loader",
     "uvicorn.logging",
     "uvicorn.loops.auto",
     "uvicorn.protocols.http.auto",
