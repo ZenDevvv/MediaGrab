@@ -150,12 +150,16 @@ def test_download_targets_switch_to_real_assets_when_published(monkeypatch):
 
     monkeypatch.setattr(dl, "DOWNLOADS_AVAILABLE", True)
     urls = dl.release_urls()
-    for key, url in urls.items():
-        assert "github.com/ZenDevvv/MediaGrab/releases/latest/download/" in url, url
+
     # Asset names must match what build-desktop.yml actually attaches.
     assert urls["windows_url"].endswith("MediaGrab-Windows.zip")
     assert urls["linux_url"].endswith("MediaGrab-Linux-x86_64.tar.gz")
-    assert urls["android_url"].endswith("MediaGrab-arm64-v8a.apk")
+    for key in ("windows_url", "linux_url"):
+        assert "github.com/ZenDevvv/MediaGrab/releases/latest/download/" in urls[key], urls[key]
+
+    # CI has no Android job, so there is no APK to point at. Asserting one here
+    # would have preserved the very dead link this module exists to prevent.
+    assert urls["android_url"] == dl.coming_soon_url()
 
 
 @pytest.mark.asyncio
@@ -1126,3 +1130,51 @@ def test_default_cooldown_is_thirty_minutes():
     from app import config
 
     assert config.YOUTUBE_COOLDOWN_SECONDS == 1800
+
+
+# --- Per-platform download availability ------------------------------------
+
+def test_unpublished_platforms_never_get_a_release_url(monkeypatch):
+    """CI builds Windows and Linux but has no Android job.
+
+    An all-or-nothing switch would advertise an APK that does not exist --
+    the dead link §1.4 Decision #16 exists to prevent.
+    """
+    from app.services import downloads
+
+    monkeypatch.setattr(downloads, "DOWNLOADS_AVAILABLE", True)
+    urls = downloads.release_urls()
+
+    assert urls["windows_url"].endswith("/MediaGrab-Windows.zip")
+    assert urls["linux_url"].endswith("/MediaGrab-Linux-x86_64.tar.gz")
+    # No APK is built, so Android must not advertise one.
+    assert urls["android_url"] == downloads.coming_soon_url()
+    assert ".apk" not in urls["android_url"]
+
+
+def test_release_urls_respect_the_published_platform_list(monkeypatch):
+    from app.services import downloads
+
+    monkeypatch.setattr(downloads, "DOWNLOADS_AVAILABLE", True)
+    monkeypatch.setattr(downloads, "PUBLISHED_PLATFORMS", frozenset({"linux"}))
+
+    urls = downloads.release_urls()
+    assert urls["linux_url"].endswith("/MediaGrab-Linux-x86_64.tar.gz")
+    assert urls["windows_url"] == downloads.coming_soon_url()
+
+
+def test_no_release_urls_before_binaries_are_published(monkeypatch):
+    from app.services import downloads
+
+    monkeypatch.setattr(downloads, "DOWNLOADS_AVAILABLE", False)
+    for url in downloads.release_urls().values():
+        assert url == downloads.coming_soon_url()
+        assert "github.com" not in url
+
+
+def test_android_is_unpublished_by_default():
+    """Guards against an APK appearing in CI without the flag being updated."""
+    from app.services.downloads import PUBLISHED_PLATFORMS
+
+    assert "android" not in PUBLISHED_PLATFORMS
+    assert {"windows", "linux"} <= PUBLISHED_PLATFORMS
