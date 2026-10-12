@@ -416,3 +416,29 @@ def test_publish_refuses_an_incomplete_release():
     assert "Refusing to publish an incomplete release" in body
     for asset in ("MediaGrab-Windows.zip", "MediaGrab-Linux-x86_64.tar.gz"):
         assert asset in body
+
+
+def test_ci_downloads_something_against_the_frozen_binary():
+    """v0.1.4 shipped broken because startup tests never download."""
+    import yaml
+
+    windows = _workflow()["jobs"]["windows"]
+    names = [s.get("name") for s in windows["steps"]]
+    assert "Smoke test a real download" in names, (
+        "a startup-only smoke test cannot catch post-processing failures"
+    )
+    step = next(s for s in windows["steps"]
+                if s.get("name") == "Smoke test a real download")
+    body = step["run"]
+    assert "/api/download" in body
+    assert "/api/progress" in body
+    # Must assert success rather than merely submitting the job.
+    assert 'status -ne "ready"' in body
+
+
+def test_linux_job_also_downloads():
+    import yaml
+
+    linux = _workflow()["jobs"]["linux"]
+    body = yaml.dump(linux)
+    assert "/api/download" in body

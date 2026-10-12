@@ -294,6 +294,10 @@ async def test_abort_reports_cancelled_and_keeps_earlier_files(tmp_path, monkeyp
         def download(self, urls):
             raise yt_dlp.utils.DownloadError("ERROR: interrupted")
 
+        def extract_info(self, url, download=True):
+            return self.download([url])
+
+
     monkeypatch.setattr(yt_dlp, "YoutubeDL", AbortingYDL)
     monkeypatch.setattr(dl_mod.yt_dlp, "YoutubeDL", AbortingYDL)
 
@@ -331,6 +335,10 @@ async def test_desktop_download_reports_bare_title(tmp_path, monkeypatch):
             target.write_bytes(b"x" * 512)
             for hook in self.opts.get("progress_hooks", []):
                 hook({"status": "finished", "info_dict": {"filepath": str(target)}})
+
+        def extract_info(self, url, download=True):
+            return self.download([url])
+
 
     monkeypatch.setattr(yt_dlp, "YoutubeDL", FakeYDL)
     monkeypatch.setattr(dl_mod.yt_dlp, "YoutubeDL", FakeYDL)
@@ -373,6 +381,10 @@ async def test_abort_does_not_delete_a_concurrent_jobs_fragments(tmp_path, monke
             (other / "other.part").write_bytes(b"concurrent download")
             raise yt_dlp.utils.DownloadError("ERROR: interrupted")
 
+        def extract_info(self, url, download=True):
+            return self.download([url])
+
+
     monkeypatch.setattr(yt_dlp, "YoutubeDL", AbortingYDL)
     monkeypatch.setattr(dl_mod.yt_dlp, "YoutubeDL", AbortingYDL)
 
@@ -410,6 +422,10 @@ async def test_successful_download_leaves_no_staging_directory(tmp_path, monkeyp
             target.write_bytes(b"x" * 256)
             for hook in self.opts.get("progress_hooks", []):
                 hook({"status": "finished", "info_dict": {"filepath": str(target)}})
+
+        def extract_info(self, url, download=True):
+            return self.download([url])
+
 
     monkeypatch.setattr(yt_dlp, "YoutubeDL", OkYDL)
     monkeypatch.setattr(dl_mod.yt_dlp, "YoutubeDL", OkYDL)

@@ -138,6 +138,63 @@ jobs:
           finally { if (-not $p.HasExited) { $p.Kill() } }
           Write-Host "No-console launch passed"
 
+      - name: Smoke test a real download
+        shell: pwsh
+        run: |
+          # The startup smoke tests never download anything, so the entire
+          # download path shipped unverified: v0.1.4 failed every desktop
+          # download with "Output media file was not created" because the
+          # post-processed output was moved out of staging and never located.
+          # Exercise the real thing against the frozen binary.
+          $exe = "dist\MediaGrab\MediaGrab.exe"
+          $p = Start-Process -FilePath $exe `
+            -ArgumentList "--no-browser","--no-native","--port","8097" -PassThru
+          try {
+            $ready = $false
+            for ($i = 0; $i -lt 60; $i++) {
+              try {
+                $c = Invoke-WebRequest -Uri "http://127.0.0.1:8097/api/capabilities" `
+                  -UseBasicParsing -TimeoutSec 5
+                if ($c.StatusCode -eq 200) { $ready = $true; break }
+              } catch { }
+              Start-Sleep -Seconds 1
+            }
+            if (-not $ready) { throw "backend never became ready for the download test" }
+
+            # A short, small, widely-available clip: this must stay quick and
+            # must not depend on any particular site's availability.
+            $body = @{
+              url = "https://www.youtube.com/watch?v=aqz-KE-bpKQ"
+              quality = "720p"
+              mode = "mp4"
+            } | ConvertTo-Json
+            $r = Invoke-WebRequest -Uri "http://127.0.0.1:8097/api/download" -Method POST `
+              -ContentType "application/json" -UseBasicParsing -TimeoutSec 60 -Body $body
+            $job = ($r.Content | ConvertFrom-Json).job_id
+            Write-Host "job $job submitted"
+
+            $status = ""
+            for ($i = 0; $i -lt 180; $i++) {
+              Start-Sleep -Seconds 2
+              $j = Invoke-WebRequest -Uri "http://127.0.0.1:8097/api/progress/$job" `
+                -UseBasicParsing -TimeoutSec 15 | Select-Object -ExpandProperty Content
+              $state = $j | ConvertFrom-Json
+              $status = $state.status
+              if ($status -eq "ready" -or $status -eq "error" -or $status -eq "cancelled") { break }
+            }
+            if ($status -ne "ready") {
+              $err = ""
+              try { $err = (Invoke-WebRequest -Uri "http://127.0.0.1:8097/api/progress/$job" `
+                -UseBasicParsing -TimeoutSec 10).Content } catch { }
+              Write-Host "final state: $status"
+              Write-Host "progress payload: $err"
+              throw "Download smoke test failed (status=$status)"
+            }
+            Write-Host "Download smoke test passed"
+          } finally {
+            if (-not $p.HasExited) { $p.Kill() }
+          }
+
       - name: Package
         run: |
           # PyInstaller builds an onedir layout: the .exe alone is NOT
@@ -203,6 +260,52 @@ jobs:
           test -x dist/MediaGrab/_internal/ffmpeg/ffmpeg || echo "WARNING: bundled ffmpeg missing"
           kill $PID
           echo "Smoke test passed"
+
+      - name: Smoke test a real download
+        run: |
+          # Startup is not enough. v0.1.4 shipped a build whose every download
+          # failed with "Output media file was not created" -- the post-processed
+          # output was moved out of the staging directory and never located.
+          # Nothing in CI had ever downloaded anything.
+          chmod +x dist/MediaGrab/MediaGrab
+          ./dist/MediaGrab/MediaGrab --no-browser --port 8097 &
+          PID=$!
+          trap 'kill $PID 2>/dev/null || true' EXIT
+
+          ready=0
+          for i in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:8097/api/capabilities > /dev/null; then
+              ready=1; break
+            fi
+            sleep 1
+          done
+          [ "$ready" -eq 1 ] || { echo "backend never became ready"; kill $PID; exit 1; }
+
+          JOB=$(curl -sf -X POST http://127.0.0.1:8097/api/download \
+            -H 'Content-Type: application/json' \
+            -d '{"url":"https://www.youtube.com/watch?v=aqz-KE-bpKQ","quality":"720p","mode":"mp4"}' \
+            | python3 -c 'import sys,json; print(json.load(sys.stdin)["job_id"])')
+          echo "job $JOB submitted"
+
+          status=""
+          for i in $(seq 1 180); do
+            sleep 2
+            payload=$(curl -sf "http://127.0.0.1:8097/api/progress/$JOB" || echo "{}")
+            status=$(printf '%s' "$payload" | python3 -c 'import sys,json; print(json.load(sys.stdin).get("status",""))' 2>/dev/null || echo "")
+            case "$status" in
+              ready|error|cancelled) break ;;
+            esac
+          done
+
+          if [ "$status" != "ready" ]; then
+            echo "final state: $status"
+            curl -sf "http://127.0.0.1:8097/api/progress/$JOB" || true
+            echo
+            kill $PID 2>/dev/null || true
+            echo "Download smoke test failed (status=$status)"
+            exit 1
+          fi
+          echo "Download smoke test passed"
 
       - name: Package tarball
         run: |

@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 from app.api.schemas import DownloadRequest, TrimConfig, SubtitlesConfig
 from app.services.downloader import (
@@ -169,3 +171,97 @@ def test_hosted_max_filesize_omitted_in_desktop_mode(monkeypatch):
 
     # The native app is unlimited by design and must not carry the cap.
     assert "max_filesize" not in opts
+
+
+# --- Final output discovery after post-processing (§ v0.1.4 diagnosis) ----
+# Desktop downloads failed with "Output media file was not created": yt-dlp
+# moves the merged result out of the per-job staging directory, but the
+# progress hook had recorded the pre-merge temp paths, which no longer exist.
+# Hosted masked this with a job-id glob; desktop has no fallback.
+
+def test_final_output_paths_reads_the_download_result():
+    from app.services.downloader import _final_output_paths
+
+    result = {
+        "filepath": "/home/u/Downloads/clip.mp4",
+        "requested_downloads": [
+            {"filepath": "/home/u/Downloads/.mediagrab-1/clip.mp4"},
+        ],
+    }
+    paths = _final_output_paths(result)
+    assert paths[0] == Path("/home/u/Downloads/clip.mp4")
+    assert len(paths) == 2
+
+
+def test_final_output_paths_falls_back_to_filename_key():
+    from app.services.downloader import _final_output_paths
+
+    assert _final_output_paths({"_filename": "/x/a.mp4"}) == [Path("/x/a.mp4")]
+
+
+def test_final_output_paths_tolerates_junk():
+    from app.services.downloader import _final_output_paths
+
+    assert _final_output_paths(None) == []
+    assert _final_output_paths("nope") == []
+    assert _final_output_paths({}) == []
+    assert _final_output_paths({"requested_downloads": ["x", None]}) == []
+
+
+def test_sync_download_records_the_post_processed_location(monkeypatch, tmp_path):
+    """The temp path from the progress hook must not be the only candidate."""
+    from app.services import downloader as dl
+    from app.api.schemas import DownloadRequest
+
+    final = tmp_path / "clip.mp4"
+    final.write_bytes(b"data")
+    stale = tmp_path / ".mediagrab-job1" / "clip.f137.mp4"
+
+    class FakeYDL:
+        def __init__(self, opts):
+            self.opts = opts
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def download(self, urls):
+            # Mirrors real behaviour: the hook saw a temp path, and the merged
+            # result now lives outside the staging directory.
+            return {"filepath": str(final)}
+
+        def extract_info(self, url, download=True):
+            return self.download([url])
+
+
+    monkeypatch.setattr(dl.yt_dlp, "YoutubeDL", FakeYDL)
+
+    produced = []
+    req = DownloadRequest(url="https://example.com/v", quality="720p", mode="mp4")
+    dl._sync_download("job1", req, None, produced)
+
+    existing = [p for p in produced if p.exists()]
+    assert final in existing
+    assert existing, "at least one recorded path must exist after the download"
+
+
+def test_downloads_folder_uses_the_downloads_shell_folder_not_the_profile():
+    """0x28 is CSIDL_PROFILE, which resolves C:\\Users\\<name>.
+
+    That put every desktop download in the profile root instead of Downloads.
+    """
+    root = Path(__file__).resolve().parent.parent
+    source = (root / "run_desktop.py").read_text(encoding="utf-8")
+    assert "SHGetFolderPathW(None, 0x05" in source, "must use CSIDL_DOWNLOADS"
+    assert "SHGetFolderPathW(None, 0x28" not in source
+
+
+def test_unexpected_job_errors_are_logged_with_a_traceback():
+    root = Path(__file__).resolve().parent.parent
+    source = (root / "app" / "services" / "downloader.py").read_text(encoding="utf-8")
+    # The launcher redirects stdio to launcher.log, so these become the log the
+    # user can paste.
+    assert "traceback.print_exc()" in source
+    assert "JOB {job_id} FAILED" in source

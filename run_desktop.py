@@ -169,8 +169,10 @@ def default_downloads_dir() -> Path:
 
             buf = wintypes.MAX_PATH
             path = ctypes.create_unicode_buffer(buf)
-            # CSIDL_PROFILE 0x28 -> FOLDERID_Downloads
-            ctypes.windll.shell32.SHGetFolderPathW(None, 0x28, None, 0, path)
+            # CSIDL_DOWNLOADS is 0x05. 0x28 is CSIDL_PROFILE, which resolves
+            # the user profile root -- that bug put downloads in C:\Users\<name>
+            # instead of C:\Users\<name>\Downloads.
+            ctypes.windll.shell32.SHGetFolderPathW(None, 0x05, None, 0, path)
             if path.value:
                 return Path(path.value)
         except Exception:

@@ -1,6 +1,7 @@
 import asyncio
 import os
 import re
+import traceback
 from pathlib import Path
 from typing import Dict, Any, Optional
 import yt_dlp
@@ -150,7 +151,7 @@ def create_ydl_opts(
     # job-id prefix because its files are ephemeral and never seen twice
     # (§1.3 Decision #13).
     if config.USER_FACING_FILENAMES:
-        out_template = str(DOWNLOADS_DIR / "%(title).150B%(ext)s")
+        out_template = str(DOWNLOADS_DIR / "%(title).150B.%(ext)s")
         # Direct yt-dlp's scratch files to a per-job staging directory. Without
         # this, partials land in the user's Downloads folder where they cannot
         # be told apart from a concurrent job's fragments -- mtime does not
@@ -231,6 +232,16 @@ def create_ydl_opts(
             elif "Merger" in postprocessor or "FFmpeg" in postprocessor:
                 job_manager.update_job(job_id, status="processing", progress=99.0, stage="Remuxing video & audio...")
         elif status == 'finished':
+            # The merge/remux has completed and the file now lives in the
+            # output directory. This is the only reliable source for the final
+            # location: the progress hook recorded the pre-merge paths inside
+            # the staging directory, which yt-dlp has since moved.
+            info = d.get('info_dict') or {}
+            final = info.get('filepath') or info.get('_filename')
+            if final and produced_files is not None:
+                candidate = Path(final)
+                if candidate not in produced_files:
+                    produced_files.append(candidate)
             job_manager.update_job(job_id, status="processing", progress=99.5, stage="Finalizing container...")
 
     opts: Dict[str, Any] = {
@@ -335,6 +346,35 @@ def create_ydl_opts(
 
     return opts
 
+def _final_output_paths(result: Any) -> list:
+    """Every real output path yt-dlp finished with.
+
+    The progress hook records paths as each stream finishes, which are the
+    pre-merge locations inside the per-job staging directory. Once a merge,
+    remux or audio extraction runs, yt-dlp moves the result out of staging and
+    those recorded paths no longer exist. Hosted mode papers over this with a
+    job-id glob; desktop has no such fallback and raised "Output media file
+    was not created" on every post-processed download.
+
+    The return value of ``ydl.download()`` carries the authoritative final
+    location, so use it.
+    """
+    paths = []
+    if not isinstance(result, dict):
+        return paths
+    candidates = [result]
+    candidates.extend(result.get("requested_downloads") or [])
+    for entry in candidates:
+        if not isinstance(entry, dict):
+            continue
+        for key in ("filepath", "_filename"):
+            value = entry.get(key)
+            if value:
+                paths.append(Path(value))
+                break
+    return paths
+
+
 def _sync_download(
     job_id: str,
     request: DownloadRequest,
@@ -343,7 +383,14 @@ def _sync_download(
 ):
     opts = create_ydl_opts(job_id, request, progress_port, produced_files)
     with yt_dlp.YoutubeDL(opts) as ydl:
-        ydl.download([request.url])
+        # extract_info, not download: download() returns an integer retcode,
+        # not the info dict, so it cannot report where the file ended up.
+        result = ydl.extract_info(request.url, download=True)
+
+    if produced_files is not None:
+        for path in _final_output_paths(result):
+            if path not in produced_files:
+                produced_files.append(path)
 
 async def execute_download(job_id: str, request: DownloadRequest):
     initial_stage = "Connecting to media stream..."
@@ -527,6 +574,12 @@ async def execute_download(job_id: str, request: DownloadRequest):
         else:
             job_manager.update_job(job_id, status="error", error=f"Download failed: {err_msg}")
     except Exception as e:
+        # The desktop launcher redirects stdio into launcher.log, so writing
+        # here is what lets a user hand over a log that actually explains the
+        # failure. Previously an unexpected post-processing error surfaced only
+        # as a one-line message in the UI with no traceback anywhere.
+        traceback.print_exc()
+        print(f"[MediaGrab] JOB {job_id} FAILED: {type(e).__name__}: {e}")
         job_manager.update_job(job_id, status="error", error=f"Processing failed: {str(e)}")
     finally:
         if server:
