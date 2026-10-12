@@ -9,6 +9,8 @@ from app import config
 from app.api.schemas import DownloadRequest
 from app.config import DOWNLOADS_DIR
 from app.services.jobs import job_manager
+from app.services.youtube_circuit import circuit as youtube_circuit, is_youtube_url
+from app.services.extractor import is_upstream_refusal
 from app.services.ytdlp_opts import base_ytdl_opts
 
 
@@ -570,6 +572,26 @@ async def execute_download(job_id: str, request: DownloadRequest):
                     "This file is larger than the hosted server limit. "
                     "Download the Desktop or Android app for unlimited file size."
                 ),
+            )
+        elif is_youtube_url(request.url) and is_upstream_refusal(raw):
+            # The metadata probe can succeed while the media request is refused:
+            # YouTube lets this address browse but not download, so an extract
+            # says nothing about whether the transfer will work. Without this
+            # branch the refusal surfaced as a generic "Download failed", the
+            # circuit stayed closed, and the next attempt hit YouTube again --
+            # which is exactly how repeated attempts escalate into the 429 the
+            # user then reports. Trip the breaker and route to the same upsell
+            # the landing page uses.
+            youtube_circuit.record_failure()
+            job_manager.update_job(
+                job_id,
+                status="error",
+                error=(
+                    "YouTube is blocking downloads from this server's address. "
+                    "The Desktop and Android apps download from your own "
+                    "connection, where this restriction doesn't apply."
+                ),
+                code="UPSTREAM_BLOCKED",
             )
         else:
             job_manager.update_job(job_id, status="error", error=f"Download failed: {err_msg}")

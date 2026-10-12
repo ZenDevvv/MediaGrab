@@ -1526,7 +1526,14 @@
           });
         } else if (job.status === 'error') {
           clearInterval(AppState.pollTimer);
-          showError(job.error || 'Download failed.');
+          // A refusal that began mid-download is still an address problem, not
+          // a broken link, so it belongs on the upgrade path rather than the
+          // generic error screen.
+          if (job.code === 'UPSTREAM_BLOCKED') {
+            showYouTubeUpsell({ message: job.error });
+            return;
+          }
+          showError(job.error || 'Download failed.', job.code);
         } else {
           handleProgressUpdate(job);
         }

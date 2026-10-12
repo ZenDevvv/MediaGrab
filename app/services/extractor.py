@@ -2,6 +2,7 @@ import asyncio
 from typing import Dict, Any, List
 import yt_dlp
 from app.api.schemas import InfoResponse, QualityOption, SubtitleOption
+from app.services.youtube_circuit import is_youtube_url
 from app.services.ytdlp_opts import base_ytdl_opts
 
 COMMON_RESOLUTIONS = [2160, 1440, 1080, 720, 480, 360]
@@ -18,6 +19,37 @@ class UpstreamBotCheck(ValueError):
 
     #: Machine-readable marker used by the frontend to pick the upsell copy.
     code = "UPSTREAM_BLOCKED"
+
+#: Substrings that mean "this server's address is refused", as opposed to
+#: "this particular link is bad". YouTube answers a refused datacenter address
+#: in several different ways depending on which layer rejects it, and matching
+#: only one of them was the reason the circuit breaker kept re-opening the gate:
+#: every unrecognised refusal produced a generic error, left the breaker
+#: closed, and invited another request, which is how a retry loop turns into
+#: the HTTP 429 the user then sees.
+_UPSTREAM_REFUSALS = (
+    "sign in to confirm",
+    "not a bot",
+    "confirm you're not a bot",
+    "http error 429",
+    "too many requests",
+    "http error 403",
+    "rate-limit",
+    "rate limit",
+)
+
+
+def is_upstream_refusal(message: str) -> bool:
+    """True when ``message`` is an address-level refusal rather than a bad link.
+
+    Only meaningful for sites that refuse by address. A 403 on an arbitrary
+    host may just as easily mean the link is gone, so callers must gate this on
+    the platform rather than apply it universally.
+    """
+    if not message:
+        return False
+    lowered = message.lower()
+    return any(signal in lowered for signal in _UPSTREAM_REFUSALS)
 
 def _sync_extract_info(url: str) -> Dict[str, Any]:
     ydl_opts = base_ytdl_opts(skip_download=True, extra={
@@ -157,8 +189,13 @@ async def inspect_url(url: str) -> InfoResponse:
             raise ValueError("This video is private.")
         elif "Video unavailable" in msg:
             raise ValueError("This video is unavailable.")
-        elif "Sign in to confirm" in msg or "not a bot" in msg:
-            # YouTube refuses anonymous requests from this server's address.
+        elif is_youtube_url(url) and is_upstream_refusal(msg):
+            # YouTube refuses anonymous requests from this server's address,
+            # and says so in whichever way suits the layer that rejected it:
+            # a bot check during extraction, a 403 on the media request, or a
+            # 429 once it has decided this address is a problem. All of them
+            # mean the same thing and none of them improve on retry.
+            #
             # Measured on the hosted VM: identical across all 11 player
             # clients, unchanged by a JS runtime, worse with TLS
             # impersonation, and unchanged on yt-dlp nightly. It is address

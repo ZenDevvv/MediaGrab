@@ -101,6 +101,8 @@ A cross-platform control test also established that **only YouTube is affected**
 
 **Decision #18 — the notice is an upsell card, not an error.** The existing `.err-line` treatment reads as failure. The new card reuses the design system's `.limit-banner` vocabulary (accent-soft, 1.5px edge border, 12px radius) with the reason, an app CTA, and a quiet line confirming other sites work. Placement: inline on the landing screen, and on the configure screen when a download is attempted there.
 
+**Decision #19a — recognise every shape of refusal, not just the bot check.** YouTube answers a refused datacenter address in several ways depending on which layer rejects it: a bot check during extraction, a 403 on the media request, a 429 once it has decided the address is a problem. Only the first was recognised, so every other refusal produced a generic error, left the circuit closed, and invited another request. Measured on the hosted instance: metadata succeeds while the transfer is refused 403, so an inspect says nothing about whether a download will work. The retry loop is what turns refusals into the 429 the user then reports, so the fix is to stop the loop, not to add a retry. All refusal shapes now open the circuit for the full cooldown; geo-restriction deliberately does not, because it is a content decision rather than anti-bot and the native app cannot help with it.
+
 **Decision #19 — copy stays truthful.** The notice says *"most links won't work here"*, not *"unavailable"*. Under the circuit breaker some links genuinely do work, and overclaiming is the fastest way to lose a user's trust when they verify elsewhere.
 
 ### 1.6 Desktop Save Destination

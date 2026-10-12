@@ -79,5 +79,8 @@ class JobProgressResponse(BaseModel):
     srt_filename: Optional[str] = None
     srt_url: Optional[str] = None
     error: Optional[str] = None
+    # Machine-readable failure marker (e.g. UPSTREAM_BLOCKED) so the client
+    # can route to the right screen instead of a generic error.
+    code: Optional[str] = None
     queue_position: Optional[int] = 0
     active_slots: int = 0

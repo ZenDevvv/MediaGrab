@@ -1178,3 +1178,97 @@ def test_android_is_unpublished_by_default():
 
     assert "android" not in PUBLISHED_PLATFORMS
     assert {"windows", "linux"} <= PUBLISHED_PLATFORMS
+
+
+# --- Upstream refusal recognition (§ "too many requests" report) ----------
+# YouTube answers a refused datacenter address in several ways. Matching only
+# the bot check left 403 and 429 as generic errors, so the circuit stayed
+# closed and every retry hit YouTube again -- which is how attempts escalate
+# into the very 429 the user reported.
+
+def test_refusal_detection_covers_every_shape_youtube_uses():
+    from app.services.extractor import is_upstream_refusal
+
+    for message in (
+        "ERROR: [youtube] x: Sign in to confirm you're not a bot",
+        "ERROR: unable to download video data: HTTP Error 403: Forbidden",
+        "HTTP Error 429: Too Many Requests",
+        "HTTP Error 429",
+    ):
+        assert is_upstream_refusal(message), message
+
+    # Genuinely bad links must not be mistaken for an address problem.
+    # Geo-restriction in particular is a content decision, not anti-bot: sending
+    # the user to the native app would be advice that cannot help.
+    for message in (
+        "Unsupported URL",
+        "Private video",
+        "Video unavailable",
+        "ERROR: The uploader has not made this video available in your country",
+        "",
+    ):
+        assert not is_upstream_refusal(message), message
+
+
+@pytest.mark.asyncio
+async def test_refusal_only_trips_the_breaker_for_youtube(monkeypatch):
+    """A 403 on another host may just mean the link is gone."""
+    from app.api import routes as routes_mod
+    from app.services.extractor import UpstreamBotCheck
+    import yt_dlp
+
+    calls = []
+
+    async def blocked(url):
+        calls.append(url)
+        raise yt_dlp.utils.DownloadError("ERROR: [generic] HTTP Error 403: Forbidden")
+
+    monkeypatch.setattr(routes_mod, "inspect_url", blocked)
+    monkeypatch.setattr(routes_mod.youtube_circuit, "is_open", lambda *a: False)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as client:
+        r = await client.post("/api/info", json={"url": "https://vimeo.com/123"})
+
+    # Not a YouTube URL, so no upsell: it stays an ordinary failure.
+    assert r.status_code != 451
+
+
+@pytest.mark.asyncio
+async def test_a_403_from_youtube_becomes_the_upsell_not_a_generic_error(monkeypatch):
+    from app.api import routes as routes_mod
+    import yt_dlp
+
+    from app.services import extractor as extractor_mod
+
+    def blocked(url):
+        raise yt_dlp.utils.DownloadError(
+            "ERROR: unable to download video data: HTTP Error 403: Forbidden"
+        )
+
+    # Stub the network layer, not inspect_url: the classifier under test is
+    # exactly the code that would otherwise be bypassed.
+    monkeypatch.setattr(extractor_mod, "_sync_extract_info", blocked)
+    monkeypatch.setattr(routes_mod.youtube_circuit, "is_open", lambda *a: False)
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://t") as client:
+        r = await client.post("/api/info", json={"url": "https://youtu.be/abc"})
+
+    assert r.status_code == 451
+    detail = r.json()["detail"]
+    assert detail["code"] == "UPSTREAM_BLOCKED"
+    assert detail["remedy"] == "native_app"
+
+
+def test_job_failures_can_carry_a_code_to_the_client():
+    from app.services.jobs import job_manager
+    from app.api.schemas import DownloadRequest
+
+    job_manager._jobs.clear()
+    job = job_manager.create_job(DownloadRequest(url="https://youtu.be/a", mode="mp4"))
+    job_manager.update_job(job.id, status="error", error="blocked", code="UPSTREAM_BLOCKED")
+    resp = job_manager.get_job(job.id).to_response()
+
+    assert resp.code == "UPSTREAM_BLOCKED"
+    assert resp.error == "blocked"

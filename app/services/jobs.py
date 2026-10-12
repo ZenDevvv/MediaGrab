@@ -27,6 +27,7 @@ class Job:
     srt_path: Optional[Path] = None
     srt_filename: Optional[str] = None
     error: Optional[str] = None
+    code: Optional[str] = None
     created_at: float = field(default_factory=time.time)
     expires_at: float = field(default_factory=lambda: time.time() + config.JOB_TTL_SECONDS)
     subscribers: List[asyncio.Queue] = field(default_factory=list)
@@ -63,6 +64,7 @@ class Job:
             srt_filename=self.srt_filename,
             srt_url=f"/api/file/{self.id}?srt=true" if self.srt_path else None,
             error=self.error,
+            code=self.code,
             queue_position=self.queue_position,
             active_slots=self.active_slots,
         )
@@ -101,6 +103,7 @@ class JobManager:
         srt_path: Optional[Path] = None,
         srt_filename: Optional[str] = None,
         error: Optional[str] = None,
+        code: Optional[str] = None,
         queue_position: Optional[int] = None,
         active_slots: Optional[int] = None,
         claimed: Optional[bool] = None,
@@ -133,6 +136,8 @@ class JobManager:
             job.srt_filename = srt_filename
         if error is not None:
             job.error = error
+        if code is not None:
+            job.code = code
         if queue_position is not None:
             job.queue_position = queue_position
         if active_slots is not None:
