@@ -32,6 +32,35 @@ os.environ.setdefault("RETENTION_ENABLED", "false")
 os.environ.setdefault("USER_FACING_FILENAMES", "true")
 
 
+def _ensure_standard_streams() -> None:
+    """Give the process real stdio even in a windowed (no-console) build.
+
+    PyInstaller builds a GUI-subsystem executable on Windows because the spec
+    sets ``console=False``, and that bootloader sets ``sys.stdout``,
+    ``sys.stderr`` and ``sys.stdin`` to ``None``. The failure this causes is
+    quiet rather than obvious: ``print()`` against a ``None`` stream is a
+    silent no-op, so the launcher's own status lines vanish without complaint,
+    and the app then dies somewhere unrelated -- uvicorn's ``DefaultFormatter``
+    calls ``sys.stdout.isatty()`` while building its logging config, which
+    raises ``AttributeError: 'NoneType' object has no attribute 'isatty'``
+    before the server ever binds.
+
+    Binding the streams to ``os.devnull`` restores objects that are writable
+    and ``isatty()``-able. ``isatty()`` then reports ``False``, which is the
+    correct answer for a GUI app: uvicorn disables ANSI colouring rather than
+    emitting escape codes nobody will see. Called more than once it is a
+    no-op, and streams that already exist are never replaced.
+
+    Must run before anything imports uvicorn or configures logging.
+    """
+    if sys.stdout is None:
+        sys.stdout = open(os.devnull, "w", encoding="utf-8")
+    if sys.stderr is None:
+        sys.stderr = open(os.devnull, "w", encoding="utf-8")
+    if sys.stdin is None:
+        sys.stdin = open(os.devnull, "r", encoding="utf-8")
+
+
 def default_downloads_dir() -> Path:
     """The OS Downloads folder, with a safe fallback if it cannot be resolved."""
     try:
@@ -234,6 +263,9 @@ def main() -> int:
     parser.add_argument("--port", type=int, default=0,
                         help="Bind a fixed port instead of an ephemeral one.")
     args = parser.parse_args()
+
+    # Before start_server(), which imports uvicorn and configures logging.
+    _ensure_standard_streams()
 
     sys.path.insert(0, str(APP_ROOT))
 

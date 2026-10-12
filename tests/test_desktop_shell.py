@@ -7,6 +7,7 @@ Covers §1.3 Decisions #12-#14:
 """
 
 import asyncio
+import io
 import os
 import sys
 import time
@@ -730,3 +731,92 @@ def test_no_cookie_or_proxy_secrets_committed():
             if s.startswith("#"):
                 continue
             assert "user:pass@" not in s, f"{name}: literal proxy credential"
+
+
+# --- Windowed (no-console) startup ----------------------------------------
+# v0.1.0 shipped a Windows build that could not start at all. The spec sets
+# console=False, so PyInstaller builds a GUI-subsystem exe whose bootloader
+# leaves sys.stdout/stderr/stdin as None. uvicorn's DefaultFormatter then calls
+# sys.stdout.isatty() and the app dies before the server binds.
+
+def _load_run_desktop():
+    import importlib.util
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent
+    spec = importlib.util.spec_from_file_location("run_desktop_under_test", root / "run_desktop.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_missing_streams_are_bound_to_devnull():
+    module = _load_run_desktop()
+    original = (sys.stdout, sys.stderr, sys.stdin)
+    try:
+        sys.stdout = sys.stderr = sys.stdin = None
+        module._ensure_standard_streams()
+        for stream in (sys.stdout, sys.stderr, sys.stdin):
+            assert stream is not None
+            assert isinstance(stream, io.IOBase)
+        assert not sys.stdout.isatty(), "GUI app must not report a tty"
+        sys.stdout.write("")  # writable, so logging cannot raise mid-write
+    finally:
+        sys.stdout, sys.stderr, sys.stdin = original
+
+
+def test_existing_streams_are_not_replaced():
+    module = _load_run_desktop()
+    original = (sys.stdout, sys.stderr, sys.stdin)
+    try:
+        module._ensure_standard_streams()
+        assert (sys.stdout, sys.stderr, sys.stdin) == original
+    finally:
+        sys.stdout, sys.stderr, sys.stdin = original
+
+
+def test_ensure_streams_is_idempotent():
+    module = _load_run_desktop()
+    original = (sys.stdout, sys.stderr, sys.stdin)
+    try:
+        sys.stdout = sys.stderr = sys.stdin = None
+        module._ensure_standard_streams()
+        first = (sys.stdout, sys.stderr, sys.stdin)
+        module._ensure_standard_streams()
+        module._ensure_standard_streams()
+        assert (sys.stdout, sys.stderr, sys.stdin) == first
+    finally:
+        sys.stdout, sys.stderr, sys.stdin = original
+
+
+def test_uvicorn_logging_config_survives_a_missing_stdout():
+    """The exact crash from v0.1.0.
+
+    uvicorn's DefaultFormatter calls sys.stdout.isatty() when building its
+    logging config, which raised AttributeError when the stream was None.
+    """
+    from uvicorn.logging import DefaultFormatter
+
+    module = _load_run_desktop()
+    original = (sys.stdout, sys.stderr, sys.stdin)
+    try:
+        sys.stdout = sys.stderr = sys.stdin = None
+        with pytest.raises(AttributeError):
+            DefaultFormatter()  # the bug, unguarded
+        module._ensure_standard_streams()
+        DefaultFormatter()  # the fix: must not raise
+    finally:
+        sys.stdout, sys.stderr, sys.stdin = original
+
+
+def test_main_binds_streams_before_starting_the_server():
+    """Guard the ordering, not just the helper.
+
+    start_server() imports uvicorn, so the guard must already have run by
+    then; placing the call later reintroduces the crash.
+    """
+    root = Path(__file__).resolve().parent.parent
+    source = (root / "run_desktop.py").read_text(encoding="utf-8")
+    guard = source.index("_ensure_standard_streams()", source.index("def main"))
+    server = source.index("start_server(args.port)", source.index("def main"))
+    assert guard < server, "streams must be bound before uvicorn is imported"
