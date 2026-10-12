@@ -8,6 +8,8 @@ import sys
 import time
 
 import httpx
+from pathlib import Path
+
 import pytest
 
 from app.main import app
@@ -442,3 +444,28 @@ def test_linux_job_also_downloads():
     linux = _workflow()["jobs"]["linux"]
     body = yaml.dump(linux)
     assert "/api/download" in body
+
+
+def test_ci_download_test_does_not_depend_on_a_third_party_site():
+    """GitHub's datacenter IPs trip YouTube's bot check.
+
+    An earlier version of this test downloaded from YouTube and failed for
+    reasons unrelated to the code, which makes it useless as a gate.
+    """
+    import yaml
+
+    jobs = _workflow()["jobs"]
+    for name in ("windows", "linux"):
+        step = next(s for s in jobs[name]["steps"]
+                    if s.get("name") == "Smoke test a real download")
+        body = step["run"]
+        assert "youtube.com" not in body, f"{name} must not depend on YouTube"
+        assert "sample.mp4" in body, f"{name} should use the committed fixture"
+
+
+def test_download_fixture_is_committed():
+    fixture = Path(__file__).resolve().parent / "fixtures" / "sample.mp4"
+    assert fixture.exists()
+    assert fixture.stat().st_size > 0
+    # Small on purpose: CI runs this on every tag.
+    assert fixture.stat().st_size < 200_000
