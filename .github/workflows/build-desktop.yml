@@ -34,11 +34,24 @@ jobs:
         run: python packaging/fetch_ffmpeg.py
 
       - name: Stamp version
+        shell: bash
         run: |
-          # The update check compares this against the latest GitHub release, so
-          # it has to be the real tag. Outside CI it stays the "dev" default.
-          echo "MEDIA_GRAB_VERSION=${GITHUB_REF_NAME}" >> "$GITHUB_ENV"
-          echo "[build] version: ${GITHUB_REF_NAME}"
+          # shell: bash is explicit because the Windows runner defaults to
+          # PowerShell, where ${GITHUB_REF_NAME} is an unset PowerShell variable
+          # rather than the environment variable. That silently stamped an
+          # empty version on Windows while Linux got the tag, which made the
+          # update check permanently report "development build".
+          VERSION="${GITHUB_REF_NAME}"
+          case "$VERSION" in
+            v*) ;;
+            *) VERSION="dev" ;;   # branch builds and manual dispatch
+          esac
+          if [ -z "$VERSION" ]; then
+            echo "::error::could not determine a version; refusing to build"
+            exit 1
+          fi
+          echo "MEDIA_GRAB_VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "[build] version: $VERSION"
 
       - name: Build
         run: pyinstaller packaging/MediaGrab.spec --noconfirm --distpath dist --workpath build
@@ -258,11 +271,24 @@ jobs:
         run: python packaging/fetch_ffmpeg.py
 
       - name: Stamp version
+        shell: bash
         run: |
-          # The update check compares this against the latest GitHub release, so
-          # it has to be the real tag. Outside CI it stays the "dev" default.
-          echo "MEDIA_GRAB_VERSION=${GITHUB_REF_NAME}" >> "$GITHUB_ENV"
-          echo "[build] version: ${GITHUB_REF_NAME}"
+          # shell: bash is explicit because the Windows runner defaults to
+          # PowerShell, where ${GITHUB_REF_NAME} is an unset PowerShell variable
+          # rather than the environment variable. That silently stamped an
+          # empty version on Windows while Linux got the tag, which made the
+          # update check permanently report "development build".
+          VERSION="${GITHUB_REF_NAME}"
+          case "$VERSION" in
+            v*) ;;
+            *) VERSION="dev" ;;   # branch builds and manual dispatch
+          esac
+          if [ -z "$VERSION" ]; then
+            echo "::error::could not determine a version; refusing to build"
+            exit 1
+          fi
+          echo "MEDIA_GRAB_VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "[build] version: $VERSION"
 
       - name: Build
         run: pyinstaller packaging/MediaGrab.spec --noconfirm --distpath dist --workpath build

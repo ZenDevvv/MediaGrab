@@ -535,8 +535,14 @@ def test_build_stamps_the_version_from_the_tag():
         steps = jobs[name]["steps"]
         stamp = next((s for s in steps if s.get("name") == "Stamp version"), None)
         assert stamp is not None, f"{name} does not stamp a version"
+        # The Windows runner defaults to PowerShell, where ${GITHUB_REF_NAME}
+        # is an unset variable rather than the env var. Without an explicit
+        # bash shell, Windows silently stamped an empty version.
+        assert stamp.get("shell") == "bash", f"{name} must pin the shell"
         assert "MEDIA_GRAB_VERSION" in stamp["run"]
         assert "GITHUB_REF_NAME" in stamp["run"], "must use the tag being built"
+        # An empty version must fail the build rather than ship.
+        assert "::error::" in stamp["run"]
         # It must happen before the build so the constant is baked in.
         names = [s.get("name") for s in steps]
         assert names.index("Stamp version") < names.index("Build")
