@@ -293,6 +293,29 @@
     renderHistory();
   }
 
+  // Reveal the folder the desktop app writes to. Hosted has no local
+  // filesystem, and /api/open-folder answers 404 there, so the control is
+  // hidden rather than shown as a button that visibly does nothing.
+  function wireOpenDownloads() {
+    const btn = $('#btn-open-downloads');
+    if (!btn) return;
+    if (isHostedMode()) {
+      btn.hidden = true;
+      return;
+    }
+    btn.hidden = false;
+    btn.addEventListener('click', async () => {
+      const label = btn.querySelector('span');
+      try {
+        const resp = await fetch(`${API_BASE}/open-folder`, { method: 'POST' });
+        if (!resp.ok) throw new Error('unavailable');
+        if (label) label.textContent = 'Opened Downloads folder';
+      } catch (e) {
+        if (label) label.textContent = 'Could not open folder';
+      }
+    });
+  }
+
   function renderHistory() {
     const list = getHistory();
     const countEl = $('#history-count');
@@ -308,19 +331,44 @@
       return;
     }
 
-    const html = list.map((item) => `
+    // Desktop already wrote every one of these to the Downloads folder, so a
+    // download link here would produce a second copy somewhere else entirely
+    // (§1.4 Decision #20). One destination: reveal the folder instead.
+    const desktop = !isHostedMode();
+    const lifetime = desktop
+      ? 'saved to your Downloads folder'
+      : `gone in ${formatRetention(AppState.retentionSeconds)}`;
+
+    const html = list.map((item) => {
+      const detail = `${item.format} · ${item.size || 'Ready'} · ${lifetime}`;
+      const action = desktop
+        ? `<button class="btn btn-sm" type="button" data-open-folder>
+             <span>Show</span>
+           </button>`
+        : `<a class="btn btn-sm" href="${item.downloadUrl || '#'}" download="${item.filename}">
+             <span>Save</span>
+           </a>`;
+      return `
       <div class="frow">
         <svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#${item.format && item.format.toLowerCase().includes('mp3') ? 'i-audio' : 'i-video'}"/></svg>
         <div>
           <code title="${item.filename}">${item.filename}</code>
-          <span class="mono">${item.format} · ${item.size || 'Ready'} · gone in 30:00</span>
+          <span class="mono">${detail}</span>
         </div>
-        <a class="btn btn-sm" href="${item.downloadUrl || '#'}" download="${item.filename}"><span>Save</span></a>
+        ${action}
       </div>
-    `).join('');
+    `;
+    }).join('');
 
     if (drawerList) drawerList.innerHTML = html;
     if (sidepanelList) sidepanelList.innerHTML = html;
+
+    // Delegated so re-rendering the list does not need rebinding.
+    $$('[data-open-folder]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        fetch(`${API_BASE}/open-folder`, { method: 'POST' }).catch(() => {});
+      });
+    });
   }
 
   // Drawer open / close
@@ -832,9 +880,17 @@
   function renderRetentionCopy() {
     const label = formatRetention(AppState.retentionSeconds);
     const side = $('#retention-side-label');
-    if (side) side.textContent = `Auto-deletes ${label} after save`;
     const drawer = $('#retention-drawer-note');
-    if (drawer) drawer.textContent = `Saved in this browser · Server copy deleted ${label} after you save`;
+    if (isHostedMode()) {
+      if (side) side.textContent = `Auto-deletes ${label} after save`;
+      if (drawer) drawer.textContent = `Saved in this browser · Server copy deleted ${label} after you save`;
+    } else {
+      // Desktop writes straight to the user's own Downloads folder. There is no
+      // server copy and nothing is ever swept, so claiming a countdown here
+      // would describe a retention policy that does not exist.
+      if (side) side.textContent = 'Saved to your Downloads';
+      if (drawer) drawer.textContent = 'Saved in this browser · Files stay in your Downloads folder';
+    }
   }
 
   function initPromoStrip() {
@@ -1672,6 +1728,7 @@
     if (histBackdrop) histBackdrop.addEventListener('click', closeHistoryDrawer);
     const btnClearHist = $('#btn-clear-history');
     if (btnClearHist) btnClearHist.addEventListener('click', clearHistory);
+    wireOpenDownloads();
 
     // Form Inspect (Home page)
     const formInspect = $('#form-inspect');
@@ -1684,6 +1741,29 @@
     }
 
     // Format Switching (Choose page)
+    let lastEmbedPref = true;
+
+    // The caption-embed switch is meaningless for MP3: there is no container
+    // to embed into, and create_ydl_opts only honours it in mp4 mode. Hide it
+    // rather than leaving a control that does nothing.
+    const syncEmbedRow = () => {
+      const row = $('#row-subs-embed');
+      if (!row) return;
+      const check = $('#check-embed-subs');
+      const audio = AppState.mode === 'mp3';
+      row.hidden = audio;
+      if (!check) return;
+      if (audio) {
+        // Remember the choice and uncheck it: a hidden switch that stays
+        // checked would still be submitted, and restoring the previous value
+        // on the way back avoids silently clearing a user's preference.
+        lastEmbedPref = check.checked;
+        check.checked = false;
+      } else {
+        check.checked = lastEmbedPref;
+      }
+    };
+
     const btnFmtVid = $('#btn-fmt-video');
     if (btnFmtVid) {
       btnFmtVid.addEventListener('click', () => {
@@ -1692,6 +1772,7 @@
         $('#btn-fmt-audio')?.classList.remove('active');
         const pVid = $('#pane-video'); if (pVid) pVid.hidden = false;
         const pAud = $('#pane-audio'); if (pAud) pAud.hidden = true;
+        syncEmbedRow();
         updateActionButtonLabel();
       });
     }
@@ -1704,9 +1785,11 @@
         $('#btn-fmt-video')?.classList.remove('active');
         const pVid = $('#pane-video'); if (pVid) pVid.hidden = true;
         const pAud = $('#pane-audio'); if (pAud) pAud.hidden = false;
+        syncEmbedRow();
         updateActionButtonLabel();
       });
     }
+    syncEmbedRow();
 
     // Audio Bitrate Selection
     $$('#audio-rows-grid .audio-row').forEach((row) => {

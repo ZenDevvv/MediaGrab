@@ -1002,7 +1002,10 @@ svg .t-hill-f { fill: var(--ink); fill-opacity: 0.12; }
 }
 
 /* Files Cards matching MediaGrab.html */
-.files, .file-cards { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+/* align-content: start keeps rows at their natural height instead of
+   stretching to fill a tall scroll container, which left the two
+   history rows drifting far apart in the drawer. */
+.files, .file-cards { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; align-content: start; }
 .file, .file-card { min-width: 0; background: var(--card); border: 1.5px solid var(--line); border-radius: 16px; padding: 14px; display: grid; gap: 12px; }
 .file .nm, .file-card .nm { min-width: 0; display: flex; gap: 12px; align-items: center; }
 .file .nm svg, .file-card .nm svg { width: 28px; height: 28px; flex: none; color: var(--ink); }

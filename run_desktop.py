@@ -151,13 +151,16 @@ def _ensure_standard_streams() -> Optional[Path]:
 
 def default_downloads_dir() -> Path:
     """The OS Downloads folder, with a safe fallback if it cannot be resolved."""
-    try:
-        from app.config import DOWNLOADS_DIR  # honours MEDIA_GRAB_DOWNLOADS_DIR
-        override = os.getenv("MEDIA_GRAB_DOWNLOADS_DIR")
-        if override:
-            return Path(override)
-    except Exception:
-        pass
+    # Read the override without importing app.config. Importing it here would
+    # execute its module-level `DOWNLOADS_DIR = Path(os.getenv(...) or ...)`
+    # and cache that value before the launcher had a chance to set the
+    # environment variable -- so the downloader and "open folder" would keep
+    # using the bundle's _internal/downloads while the launcher reported the
+    # real Downloads folder. run_desktop.main() runs this before anything
+    # imports app.config, so the override is picked up correctly.
+    override = os.getenv("MEDIA_GRAB_DOWNLOADS_DIR")
+    if override:
+        return Path(override)
 
     home = Path.home()
     if sys.platform == "darwin":

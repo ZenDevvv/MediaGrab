@@ -947,3 +947,108 @@ def test_pythonnet_is_bundled_for_the_native_window():
     assert '"pythonnet"' in spec
     assert '"clr_loader"' in spec
     assert '"clr"' in spec
+
+
+# --- Downloads folder must be the user's, not the app bundle ---------------
+# configure_downloads_dir() used to import app.config before setting
+# MEDIA_GRAB_DOWNLOADS_DIR, which cached DOWNLOADS_DIR at its module default.
+# In the frozen bundle that default is _internal/downloads, so the downloader
+# and "open folder" used the app's own folder while the launcher reported the
+# real one.
+
+def test_launcher_does_not_import_app_config_before_setting_the_override():
+    root = Path(__file__).resolve().parent.parent
+    source = (root / "run_desktop.py").read_text(encoding="utf-8")
+    start = source.index("def default_downloads_dir")
+    end = source.index("\ndef ", start + 10)
+    body = source[start:end]
+    assert "from app.config import" not in body, (
+        "importing app.config here caches DOWNLOADS_DIR before the override is set"
+    )
+    assert "MEDIA_GRAB_DOWNLOADS_DIR" in body
+
+
+def test_downloads_dir_actually_follows_the_launcher(tmp_path):
+    import os, subprocess, sys, textwrap
+
+    if sys.platform.startswith("win"):
+        pytest.skip("the launcher resolves Downloads via the Windows shell API")
+
+    home = tmp_path / "home"
+    (home / "Downloads").mkdir(parents=True)
+    script = textwrap.dedent(
+        f"""
+        import os, sys
+        sys.path.insert(0, {str(Path(__file__).resolve().parent.parent)!r})
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("rd", "run_desktop.py")
+        rd = importlib.util.module_from_spec(spec); spec.loader.exec_module(rd)
+        target = rd.configure_downloads_dir()
+        from app.config import DOWNLOADS_DIR
+        print(str(target) == str(DOWNLOADS_DIR))
+        """
+    )
+    env = {**os.environ, "HOME": str(home), "MEDIAGRAB_MODE": "desktop"}
+    env.pop("MEDIA_GRAB_DOWNLOADS_DIR", None)
+    root = Path(__file__).resolve().parent.parent
+    out = subprocess.run(
+        [sys.executable, "-c", script], capture_output=True, text=True, env=env, cwd=str(root)
+    )
+    assert out.stdout.strip() == "True", out.stdout + out.stderr
+
+
+# --- Caption embed row is MP4-only -----------------------------------------
+
+def test_embed_row_is_hidden_for_audio():
+    root = Path(__file__).resolve().parent.parent
+    source = (root / "static" / "js" / "app.js").read_text(encoding="utf-8")
+    assert "syncEmbedRow" in source
+    body = source[source.index("const syncEmbedRow"):source.index("const btnFmtVid")]
+    assert "row-subs-embed" in body
+    assert "mp3" in body
+    # A switch left checked while hidden would still be submitted, and the
+    # preference must survive a round trip through audio.
+    assert "check.checked = false" in body
+    assert "lastEmbedPref" in body
+    # Both format handlers must call it, or switching back to video is missed.
+    assert source.count("syncEmbedRow();") >= 3
+
+
+# --- One destination on desktop --------------------------------------------
+
+def test_history_does_not_offer_a_second_download_on_desktop():
+    root = Path(__file__).resolve().parent.parent
+    source = (root / "static" / "js" / "app.js").read_text(encoding="utf-8")
+    start = source.index("function renderHistory()")
+    end = source.index("function openHistoryDrawer", start)
+    body = source[start:end]
+    assert "data-open-folder" in body, "desktop rows must reveal the folder"
+    assert "isHostedMode()" in body
+    # The HTTP download is hosted-only now.
+    assert "download=\"${item.filename}\"" in body
+
+
+def test_history_lifetime_copy_is_not_hardcoded():
+    root = Path(__file__).resolve().parent.parent
+    source = (root / "static" / "js" / "app.js").read_text(encoding="utf-8")
+    start = source.index("function renderHistory()")
+    end = source.index("function openHistoryDrawer", start)
+    body = source[start:end]
+    assert "gone in 30:00" not in body, (
+        "30 minutes was wrong in hosted (purge is ~60s) and desktop (never)"
+    )
+    assert "formatRetention" in body
+    assert "saved to your Downloads folder" in body
+
+
+def test_open_downloads_button_exists_and_is_hidden_by_default():
+    html = (Path(__file__).resolve().parent.parent / "static" / "index.html").read_text()
+    assert 'id="btn-open-downloads"' in html
+    assert 'id="btn-open-downloads" type="button" hidden' in html
+    assert "Open Downloads folder" in html
+
+    js = (Path(__file__).resolve().parent.parent / "static" / "js" / "app.js").read_text()
+    start = js.index("function wireOpenDownloads")
+    body = js[start:js.index("function renderHistory", start)]
+    assert "isHostedMode()" in body, "hosted must hide it, not show a dead control"
+    assert "open-folder" in body
