@@ -341,15 +341,13 @@ async def api_open_folder(request: Request):
         )
 
     target = config.DOWNLOADS_DIR
+    if not config.OS_OPEN_ENABLED:
+        # The route is still exercised; only the OS side effect is suppressed,
+        # so a test run cannot pop a file manager on the machine running it.
+        return {"opened": str(target), "suppressed": True}
+
     try:
-        if sys.platform == "darwin":
-            subprocess.Popen(["open", str(target)])
-        elif sys.platform.startswith("win"):
-            os.startfile(str(target))  # type: ignore[attr-defined]
-        else:
-            subprocess.Popen(["xdg-open", str(target)],
-                             stdout=subprocess.DEVNULL,
-                             stderr=subprocess.DEVNULL)
+        _reveal_in_os(target)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Could not open folder: {e}")
 
@@ -449,6 +447,11 @@ async def api_diagnostics_open_log():
             status_code=404,
             detail="No log file yet. Start the app once and try again.",
         )
+    if not config.OS_OPEN_ENABLED:
+        # Same reasoning as /open-folder: exercising the route must not launch
+        # an editor on the machine running the suite.
+        return {"opened": str(path), "suppressed": True}
+
     try:
         _reveal_in_os(path)
     except Exception as e:

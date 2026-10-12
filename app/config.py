@@ -12,6 +12,14 @@ STATIC_DIR = BASE_DIR / "static"
 # is meaningless without knowing what is running. "dev" outside CI.
 APP_VERSION = os.getenv("MEDIA_GRAB_VERSION", "dev")
 
+# Whether endpoints that hand a path to the OS file manager may actually do so.
+# Automated tests drive the real "Open in Downloads" button, and honouring it
+# pops a file manager window on whatever machine is running the suite -- which
+# interrupts whoever is working there. Disabling it keeps the route exercised
+# end to end while suppressing the only side effect that escapes the test
+# process. Never disable this in a real deployment.
+OS_OPEN_ENABLED = os.getenv("MEDIA_GRAB_OS_OPEN", "true").lower() != "false"
+
 # Public repository used for the update check. Kept next to GITHUB_RELEASES_URL
 # so both point at the same project.
 GITHUB_REPO = os.getenv("MEDIA_GRAB_GITHUB_REPO", "ZenDevvv/MediaGrab")

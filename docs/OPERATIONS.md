@@ -269,6 +269,25 @@ that cannot exist. Adding an Android build means adding its asset name to
 
 ## 5. Triage: a user reports something wrong
 
+### 5.0 Running the test suite on a machine you are working on
+
+The desktop-mode browser tests click the real "Open in Downloads" button. That
+route hands a path to the OS file manager, so an unmitigated run pops a window
+per test — disruptive on a desktop.
+
+The suite isolates itself, so this is only worth knowing if you add tests:
+
+```ini
+MEDIA_GRAB_OS_OPEN=false        # routes run; the OS side effect is suppressed
+MEDIA_GRAB_DOWNLOADS_DIR=<tmp>  # downloads go to a temp dir, removed afterwards
+```
+
+Both are set by the `_server` fixture in `tests/test_ui_dom.py`, which also
+removes its temp directory when the server exits. Desktop downloads otherwise
+leave per-job `.mediagrab-<job_id>/` staging directories behind; they are the
+mechanism that keeps an abort from touching a concurrent job, so seeing a few
+mid-run is normal, but they should not accumulate in your real Downloads folder.
+
 ### 5.1 Desktop: always ask for the log
 
 A windowed app has no console, so nothing is visible unless it is logged. The

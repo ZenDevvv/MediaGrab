@@ -4,6 +4,7 @@ import re
 import shutil
 import socket
 import subprocess
+import tempfile
 import sys
 import time
 
@@ -127,7 +128,17 @@ def _free_port() -> int:
 def _server(mode: str):
     """Run uvicorn under an explicit MEDIAGRAB_MODE for the duration of a test."""
     port = _free_port()
-    env = {**os.environ, "MEDIAGRAB_MODE": mode}
+    # Two things a test run must not do to the machine it is running on:
+    # pop a file manager (the desktop-mode E2E clicks the real "Open in
+    # Downloads" button), and litter the developer's Downloads folder. Both are
+    # contained here rather than by skipping the tests.
+    tmp_downloads = tempfile.mkdtemp(prefix="mediagrab-test-downloads-")
+    env = {
+        **os.environ,
+        "MEDIAGRAB_MODE": mode,
+        "MEDIA_GRAB_OS_OPEN": "false",
+        "MEDIA_GRAB_DOWNLOADS_DIR": tmp_downloads,
+    }
     proc = subprocess.Popen(
         [
             sys.executable, "-m", "uvicorn", "app.main:app",
@@ -167,6 +178,9 @@ def _server(mode: str):
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait(timeout=5)
+        # The isolated downloads dir is ours; leaving it behind would trade one
+        # accumulating pile for another.
+        shutil.rmtree(tmp_downloads, ignore_errors=True)
 
 
 @pytest.fixture(scope="module")
@@ -758,3 +772,63 @@ def test_operations_does_not_document_a_nonexistent_cli_flag():
     # Named only in order to say it does not work.
     assert "--set auto-delete-seconds" not in ops or "What does *not* work" in ops
     assert "--idle-timeout-seconds" in ops  # the flag that does exist
+
+
+# --- Tests must not disturb the machine they run on ------------------------
+# The desktop-mode E2E clicks the real "Open in Downloads" button. Honouring
+# that request pops a file manager window on whatever machine is running the
+# suite, which interrupts whoever is working there.
+
+def test_open_folder_route_is_exercised_but_side_effect_suppressed(monkeypatch, tmp_path):
+    from app.api import routes as routes_mod
+    from app.config import DOWNLOADS_DIR
+    from app.main import app
+    from httpx import ASGITransport, AsyncClient
+    import asyncio
+
+    called = []
+    monkeypatch.setattr(routes_mod.config, "IS_HOSTED", False)
+    monkeypatch.setattr(routes_mod.config, "OS_OPEN_ENABLED", False)
+    monkeypatch.setattr(routes_mod, "_reveal_in_os", lambda p: called.append(p))
+
+    async def run():
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            return await c.post("/api/open-folder")
+
+    resp = asyncio.run(run())
+    assert resp.status_code == 200
+    # The route still runs and reports the path...
+    assert resp.json()["suppressed"] is True
+    # ...but nothing was handed to the OS.
+    assert called == []
+
+
+def test_open_folder_still_works_when_enabled(monkeypatch):
+    """The suppression must not become a silent disable of the feature."""
+    from app.api import routes as routes_mod
+    from app.main import app
+    from httpx import ASGITransport, AsyncClient
+    import asyncio
+
+    called = []
+    monkeypatch.setattr(routes_mod.config, "IS_HOSTED", False)
+    monkeypatch.setattr(routes_mod.config, "OS_OPEN_ENABLED", True)
+    monkeypatch.setattr(routes_mod, "_reveal_in_os", lambda p: called.append(p))
+
+    async def run():
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://t") as c:
+            return await c.post("/api/open-folder")
+
+    resp = asyncio.run(run())
+    assert resp.status_code == 200
+    assert resp.json().get("suppressed") is None
+    assert len(called) == 1
+
+
+def test_e2e_servers_disable_os_open_and_isolate_downloads():
+    """Guards the fixture, not just the endpoint."""
+    source = Path(__file__).resolve().parent
+    text = (source / "test_ui_dom.py").read_text()
+    fixture = text[text.index("def _server(mode"):text.index("def live_server")]
+    assert '"MEDIA_GRAB_OS_OPEN": "false"' in fixture
+    assert '"MEDIA_GRAB_DOWNLOADS_DIR"' in fixture
