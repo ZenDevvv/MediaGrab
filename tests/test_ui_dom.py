@@ -358,3 +358,61 @@ def test_retention_copy_is_human_readable():
     assert "deleted from the server" in js
     # The old copy implied the file is deleted before it is saved.
     assert "after you save it. Save it now" not in js
+
+
+# --- Release publishing is gated on verification (§v0.1.0 regression) ------
+
+def _workflow_text() -> str:
+    """Raw file text. yaml.dump re-wraps long lines, breaking substring checks."""
+    with open(".github/workflows/build-desktop.yml", "r", encoding="utf-8") as f:
+        return f.read()
+
+
+def _workflow():
+    import yaml
+    return yaml.safe_load(_workflow_text())
+
+
+def test_publish_job_waits_for_both_builds():
+    """v0.1.0 published a Linux-only release while the Windows job failed."""
+    jobs = _workflow()["jobs"]
+    assert "publish" in jobs, "a single gated job must create the release"
+    assert set(jobs["publish"].get("needs", [])) == {"windows", "linux"}
+
+
+def test_only_the_gated_job_creates_the_release():
+    import yaml
+
+    jobs = _workflow()["jobs"]
+    creators = []
+    for name, job in jobs.items():
+        if "action-gh-release" in yaml.dump(job):
+            creators.append(name)
+    # If a build job published on its own, a failure in its sibling would
+    # still leave a half-release published -- exactly what v0.1.0 did.
+    assert creators == ["publish"], creators
+
+
+def test_windows_verifies_a_no_console_launch():
+    """The launch mode that exposes the missing-stdio crash.
+
+    A redirect hands the child real file handles, so its stdout is never None.
+    Only an unredirected launch reproduces a double-click.
+    """
+    windows = _workflow()["jobs"]["windows"]
+    step = next(s for s in windows["steps"]
+                if s.get("name") == "Smoke test survives a no-console launch")
+    body = step["run"]
+    assert "Start-Process" in body
+    assert "/api/capabilities" in body
+    # The regression guard is precisely the absence of redirection.
+    assert "-RedirectStandardOutput" not in body
+    assert "-RedirectStandardError" not in body
+
+
+def test_publish_refuses_an_incomplete_release():
+    publish = _workflow()["jobs"]["publish"]
+    body = "\n".join(s.get("run", "") for s in publish["steps"])
+    assert "Refusing to publish an incomplete release" in body
+    for asset in ("MediaGrab-Windows.zip", "MediaGrab-Linux-x86_64.tar.gz"):
+        assert asset in body

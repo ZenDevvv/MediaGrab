@@ -259,7 +259,9 @@ def test_workflow_covers_both_platforms():
     import yaml
 
     wf = yaml.safe_load(Path(".github/workflows/build-desktop.yml").read_text())
-    assert set(wf["jobs"]) == {"windows", "linux"}
+    # windows and linux build; publish is the gated job that ships their
+    # artifacts, so it is expected alongside them.
+    assert {"windows", "linux"} <= set(wf["jobs"])
     win = yaml.safe_dump(wf["jobs"]["windows"])
     lin = yaml.safe_dump(wf["jobs"]["linux"])
     assert "MediaGrab.spec" in win and "MediaGrab.spec" in lin

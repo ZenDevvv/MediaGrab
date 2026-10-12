@@ -100,6 +100,44 @@ jobs:
             if (-not $p.HasExited) { $p.Kill() }
           }
 
+      - name: Smoke test survives a no-console launch
+        shell: pwsh
+        run: |
+          # Reproduces a double-click. v0.1.0 shipped a build that could not
+          # start: the spec sets console=False, so the bootloader leaves
+          # sys.stdout as None and uvicorn's logging config died on
+          # sys.stdout.isatty(). The piped smoke test above could never catch
+          # this -- Start-Process with -Redirect hands the child real file
+          # handles, so its stdout is a valid stream. Launching with NO
+          # redirection gives it none, exactly as a user launching it gets.
+          $exe = "dist\MediaGrab\MediaGrab.exe"
+          $p = Start-Process -FilePath $exe `
+            -ArgumentList "--no-browser","--no-native","--port","8098" -PassThru
+
+          $ok = $false
+          for ($i = 0; $i -lt 60; $i++) {
+            if ($p.HasExited) { break }
+            try {
+              $r = Invoke-WebRequest -Uri "http://127.0.0.1:8098/api/capabilities" `
+                -UseBasicParsing -TimeoutSec 5
+              if ($r.StatusCode -eq 200 -and $r.Content -match '"desktop"') { $ok = $true; break }
+            } catch { }
+            Start-Sleep -Seconds 1
+          }
+
+          if (-not $ok) {
+            if ($p.HasExited) {
+              Write-Host "Process exited with code $($p.ExitCode) -- no stdout/stderr redirect, so PyInstaller showed a traceback dialog."
+            } else {
+              Write-Host "Process still running but never served /api/capabilities"
+            }
+            throw "Windowed launch failed: the GUI build cannot initialise without valid stdio"
+          }
+
+          try { $null = Invoke-WebRequest -Uri "http://127.0.0.1:8098/api/capabilities" -UseBasicParsing -TimeoutSec 5 }
+          finally { if (-not $p.HasExited) { $p.Kill() } }
+          Write-Host "No-console launch passed"
+
       - name: Package
         run: |
           # PyInstaller builds an onedir layout: the .exe alone is NOT
@@ -118,15 +156,6 @@ jobs:
             MediaGrab-Windows.zip
             MediaGrab-Windows.zip.sha256
           retention-days: 14
-
-      - name: Attach to release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            MediaGrab-Windows.zip
-            MediaGrab-Windows.zip.sha256
-          fail_on_unmatched_files: true
 
   linux:
     name: Linux (tar.gz)
@@ -189,10 +218,37 @@ jobs:
             MediaGrab-Linux-x86_64.tar.gz.sha256
           retention-days: 14
 
+  # Publishing is gated on every build and every verification passing.
+  #
+  # v0.1.0 published a release containing only the Linux tarball: each job
+  # created the release itself, so the Linux job succeeded and shipped while
+  # the Windows job failed. Nobody had to be told -- the download button simply
+  # pointed at a build that could not start. Attaching from a single job that
+  # `needs` both means an unverified build is never published.
+  publish:
+    name: Publish release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, linux]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Verify every expected asset is present
+        run: |
+          missing=0
+          for f in MediaGrab-Windows.zip MediaGrab-Windows.zip.sha256 \
+                   MediaGrab-Linux-x86_64.tar.gz MediaGrab-Linux-x86_64.tar.gz.sha256; do
+            if [ ! -f "dist/$f" ]; then echo "MISSING: $f"; missing=1; fi
+          done
+          ls -la dist
+          [ "$missing" -eq 0 ] || { echo "Refusing to publish an incomplete release"; exit 1; }
+
       - name: Attach to release
-        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            MediaGrab-Linux-x86_64.tar.gz
-            MediaGrab-Linux-x86_64.tar.gz.sha256
+          files: dist/*
+          fail_on_unmatched_files: true
+          generate_release_notes: true
