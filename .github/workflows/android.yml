@@ -37,7 +37,28 @@ jobs:
         uses: gradle/actions/setup-gradle@v4
 
       - name: Install the Android SDK
-        uses: android-actions/setup-android@v3
+        # The same script developers run, rather than android-actions/setup-android.
+        #
+        # That action fails on current runners: it shells out to a bundled
+        # cmdline-tools 16.0 and asks it for a package named "tools", which no
+        # longer exists in modern SDK releases --
+        #   "Warning: Failed to find package 'tools'"
+        #   sdkmanager failed with exit code 1
+        # One source of truth for how the toolchain is installed is also worth
+        # more than saving a dependency: if this ever diverges from what works
+        # locally, CI stops being evidence of anything.
+        run: bash dev/setup-android.sh
+
+      - name: Load the toolchain
+        run: |
+          source .toolchain/env.sh
+          echo "JAVA_HOME=$JAVA_HOME" >> "$GITHUB_ENV"
+          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
+          echo "GRADLE_USER_HOME=$GRADLE_USER_HOME" >> "$GITHUB_ENV"
+          echo "GRADLE_USER_HOME=$GRADLE_USER_HOME" >> "$GITHUB_PATH"
+          echo "$JAVA_HOME/bin" >> "$GITHUB_PATH"
+          java -version
+          ls "$ANDROID_HOME/platforms"
 
       - name: Verify the OpenAPI contract snapshot is current
         # Fails the build if the snapshot drifted, before spending minutes on a
