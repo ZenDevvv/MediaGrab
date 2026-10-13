@@ -23,3 +23,29 @@ Why it exists: M4 is the first milestone that cannot be verified without a
 compiler. The desktop milestone shipped with CI green and still had five
 defects that only a real run on real hardware found (ARCHITECTURE.md §13).
 Writing an APK blind would repeat that at larger scale.
+
+## `sync-contract.py`
+
+Maintains `openapi-contract.json`, a snapshot of the OpenAPI document FastAPI
+serves at `/openapi.json`.
+
+```bash
+python dev/sync-contract.py           # regenerate and rewrite the file
+python dev/sync-contract.py --check   # exit 1 if it is stale
+```
+
+Run it after any **intentional** change to a request or response model, and
+commit the result. `tests/test_api_contract.py` asserts the live spec still
+matches, so a contract change cannot land without the snapshot moving with it.
+
+The snapshot exists because M4 re-implements these eleven endpoints in Kotlin
+while `static/js/app.js` — the frontend both servers share — stays one file.
+Without a pinned contract, drift between the two implementations produces no
+error anywhere: the WebView renders nothing on a phone while desktop keeps
+working. The specific failure is naming. Pydantic emits snake_case
+(`job_id`, `download_url`); Kotlin's default is camelCase, so a `val jobId`
+serialises to `{"jobId": …}`, the frontend reads `.job_id`, gets `undefined`,
+and no stack trace is ever produced.
+
+The Android build should consume the same file rather than restating the
+schema in Kotlin.

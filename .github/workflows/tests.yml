@@ -95,6 +95,9 @@ jobs:
       - name: Run the suite
         run: python -m pytest tests/ -v --tb=short
 
+      - name: Verify the OpenAPI contract snapshot
+        run: python dev/sync-contract.py --check
+
       - name: Report JS runtime resolution
         run: |
           # Cheap, and it turns "YouTube stopped working" into a one-line diff.

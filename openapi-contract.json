@@ -1,0 +1,1020 @@
+{
+  "components": {
+    "schemas": {
+      "CapabilitiesResponse": {
+        "properties": {
+          "downloads": {
+            "$ref": "#/components/schemas/DownloadsResponse"
+          },
+          "js_runtimes": {
+            "$ref": "#/components/schemas/JsRuntimeResponse"
+          },
+          "limits": {
+            "$ref": "#/components/schemas/LimitsResponse"
+          },
+          "mode": {
+            "enum": [
+              "desktop",
+              "hosted"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "retention_seconds": {
+            "title": "Retention Seconds",
+            "type": "integer"
+          },
+          "version": {
+            "default": "dev",
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode",
+          "retention_seconds",
+          "limits",
+          "downloads"
+        ],
+        "title": "CapabilitiesResponse",
+        "type": "object"
+      },
+      "DownloadRequest": {
+        "properties": {
+          "bitrate": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": 192,
+            "title": "Bitrate"
+          },
+          "mode": {
+            "default": "mp4",
+            "enum": [
+              "mp4",
+              "mp3",
+              "srt"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "quality": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": "1080p",
+            "title": "Quality"
+          },
+          "subtitles": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SubtitlesConfig"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "trim": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TrimConfig"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "DownloadRequest",
+        "type": "object"
+      },
+      "DownloadResponse": {
+        "properties": {
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id"
+        ],
+        "title": "DownloadResponse",
+        "type": "object"
+      },
+      "DownloadsResponse": {
+        "properties": {
+          "android_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Android Url"
+          },
+          "linux_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Linux Url"
+          },
+          "windows_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Windows Url"
+          }
+        },
+        "title": "DownloadsResponse",
+        "type": "object"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "InfoRequest": {
+        "properties": {
+          "url": {
+            "description": "Target media URL",
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "InfoRequest",
+        "type": "object"
+      },
+      "InfoResponse": {
+        "properties": {
+          "duration": {
+            "title": "Duration",
+            "type": "integer"
+          },
+          "qualities": {
+            "items": {
+              "$ref": "#/components/schemas/QualityOption"
+            },
+            "title": "Qualities",
+            "type": "array"
+          },
+          "source_audio_codec": {
+            "default": "opus",
+            "title": "Source Audio Codec",
+            "type": "string"
+          },
+          "source_audio_kbps": {
+            "default": 128,
+            "title": "Source Audio Kbps",
+            "type": "integer"
+          },
+          "subtitles": {
+            "items": {
+              "$ref": "#/components/schemas/SubtitleOption"
+            },
+            "title": "Subtitles",
+            "type": "array"
+          },
+          "thumbnail": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thumbnail"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "uploader": {
+            "title": "Uploader",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url",
+          "title",
+          "uploader",
+          "duration"
+        ],
+        "title": "InfoResponse",
+        "type": "object"
+      },
+      "JobProgressResponse": {
+        "properties": {
+          "active_slots": {
+            "default": 0,
+            "title": "Active Slots",
+            "type": "integer"
+          },
+          "code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code"
+          },
+          "download_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Download Url"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "eta": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Eta"
+          },
+          "filename": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filename"
+          },
+          "got": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Got"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "progress": {
+            "default": 0.0,
+            "title": "Progress",
+            "type": "number"
+          },
+          "queue_position": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": 0,
+            "title": "Queue Position"
+          },
+          "size": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size"
+          },
+          "speed": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Speed"
+          },
+          "srt_filename": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Srt Filename"
+          },
+          "srt_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Srt Url"
+          },
+          "stage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stage"
+          },
+          "status": {
+            "enum": [
+              "queued",
+              "extracting",
+              "downloading",
+              "processing",
+              "ready",
+              "error",
+              "cancelled"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id",
+          "status"
+        ],
+        "title": "JobProgressResponse",
+        "type": "object"
+      },
+      "JsRuntimeResponse": {
+        "properties": {
+          "available": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Available",
+            "type": "array"
+          },
+          "configured": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Configured",
+            "type": "array"
+          },
+          "missing": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing",
+            "type": "array"
+          }
+        },
+        "title": "JsRuntimeResponse",
+        "type": "object"
+      },
+      "LimitsResponse": {
+        "properties": {
+          "concurrency_limit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Concurrency Limit"
+          },
+          "idle_watchdog_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Idle Watchdog Seconds"
+          },
+          "locked_resolutions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Locked Resolutions",
+            "type": "array"
+          },
+          "max_duration_seconds": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Duration Seconds"
+          },
+          "max_file_size_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max File Size Bytes"
+          },
+          "max_resolution": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Resolution"
+          },
+          "per_ip_limit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Per Ip Limit"
+          },
+          "per_session_limit": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Per Session Limit"
+          }
+        },
+        "title": "LimitsResponse",
+        "type": "object"
+      },
+      "QualityOption": {
+        "properties": {
+          "approx_bytes": {
+            "default": 0,
+            "title": "Approx Bytes",
+            "type": "integer"
+          },
+          "resolution": {
+            "title": "Resolution",
+            "type": "string"
+          },
+          "type": {
+            "default": "remux",
+            "enum": [
+              "remux",
+              "encode"
+            ],
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "resolution"
+        ],
+        "title": "QualityOption",
+        "type": "object"
+      },
+      "SubtitleOption": {
+        "properties": {
+          "is_auto": {
+            "default": false,
+            "title": "Is Auto",
+            "type": "boolean"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "lang": {
+            "title": "Lang",
+            "type": "string"
+          }
+        },
+        "required": [
+          "lang",
+          "label"
+        ],
+        "title": "SubtitleOption",
+        "type": "object"
+      },
+      "SubtitlesConfig": {
+        "properties": {
+          "embed": {
+            "default": true,
+            "title": "Embed",
+            "type": "boolean"
+          },
+          "lang": {
+            "title": "Lang",
+            "type": "string"
+          }
+        },
+        "required": [
+          "lang"
+        ],
+        "title": "SubtitlesConfig",
+        "type": "object"
+      },
+      "TrimConfig": {
+        "properties": {
+          "end": {
+            "default": 0,
+            "title": "End",
+            "type": "integer"
+          },
+          "start": {
+            "default": 0,
+            "title": "Start",
+            "type": "integer"
+          }
+        },
+        "title": "TrimConfig",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "ctx": {
+            "title": "Context",
+            "type": "object"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      }
+    }
+  },
+  "info": {
+    "description": "Lightweight self-hosted media downloader, trimmer, and converter (PWA)",
+    "title": "MediaGrab",
+    "version": "1.0.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/abort/{job_id}": {
+      "post": {
+        "description": "Cancel an in-flight job and purge whatever it has written so far.",
+        "operationId": "api_abort_api_abort__job_id__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Abort"
+      }
+    },
+    "/api/capabilities": {
+      "get": {
+        "description": "Single source of truth for what this deployment allows and offers.",
+        "operationId": "api_capabilities_api_capabilities_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CapabilitiesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Api Capabilities"
+      }
+    },
+    "/api/diagnostics/log": {
+      "get": {
+        "description": "Return the launcher log tail and where the file lives.\n\nOnly the tail is returned: the file grows without bound and a failed run is\nalways at the end.",
+        "operationId": "api_diagnostics_log_api_diagnostics_log_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "tail_bytes",
+            "required": false,
+            "schema": {
+              "default": 200000,
+              "maximum": 5000000,
+              "minimum": 1024,
+              "title": "Tail Bytes",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Diagnostics Log"
+      }
+    },
+    "/api/diagnostics/open-log": {
+      "post": {
+        "description": "Reveal launcher.log in the OS default application.",
+        "operationId": "api_diagnostics_open_log_api_diagnostics_open_log_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Api Diagnostics Open Log"
+      }
+    },
+    "/api/diagnostics/update-check": {
+      "get": {
+        "description": "Compare the running build against the newest GitHub release.\n\nGoes through the server rather than the browser so it works identically in\nthe packaged app, where the page is served from a loopback address and the\nrelease API would be a cross-origin request.",
+        "operationId": "api_diagnostics_update_check_api_diagnostics_update_check_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Api Diagnostics Update Check"
+      }
+    },
+    "/api/download": {
+      "post": {
+        "operationId": "api_download_api_download_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DownloadRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DownloadResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Download"
+      }
+    },
+    "/api/events/{job_id}": {
+      "get": {
+        "operationId": "api_events_api_events__job_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Events"
+      }
+    },
+    "/api/file/{job_id}": {
+      "get": {
+        "operationId": "api_file_api_file__job_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "srt",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Srt",
+              "type": "boolean"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api File"
+      }
+    },
+    "/api/info": {
+      "post": {
+        "operationId": "api_info_api_info_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InfoRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InfoResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Info"
+      }
+    },
+    "/api/open-folder": {
+      "post": {
+        "description": "Reveal the output directory in the OS file manager (desktop only).\n\nHosted has no local filesystem to reveal, and there is no path a browser\ncould be pointed at, so this refuses rather than pretending to succeed.",
+        "operationId": "api_open_folder_api_open_folder_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Api Open Folder"
+      }
+    },
+    "/api/progress/{job_id}": {
+      "get": {
+        "operationId": "api_progress_api_progress__job_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobProgressResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Api Progress"
+      }
+    }
+  }
+}
