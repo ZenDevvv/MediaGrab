@@ -69,8 +69,15 @@ jobs:
           source .toolchain/env.sh
           echo "JAVA_HOME=$JAVA_HOME" >> "$GITHUB_ENV"
           echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
+          # Must be written too, not just ANDROID_HOME. GitHub's ubuntu images
+          # predefine ANDROID_SDK_ROOT=/usr/local/lib/android/sdk, and Gradle
+          # refuses to build when the two disagree:
+          #   "Several environment variables and/or system properties contain
+          #    different paths to the SDK"
+          # Setting only one leaves the runner's value in place.
+          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
           echo "GRADLE_USER_HOME=$GRADLE_USER_HOME" >> "$GITHUB_ENV"
-          echo "GRADLE_USER_HOME=$GRADLE_USER_HOME" >> "$GITHUB_PATH"
+          echo "$GRADLE_USER_HOME" >> "$GITHUB_PATH"
           echo "$JAVA_HOME/bin" >> "$GITHUB_PATH"
           java -version
           ls "$ANDROID_HOME/platforms"
