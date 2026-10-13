@@ -1,4 +1,27 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <application android:label="MediaGrab" />
+
+    <!-- yt-dlp's own traffic, and the WebView's loopback connection to Ktor. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+
+    <application
+        android:name=".MediaGrabApp"
+        android:label="MediaGrab"
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:theme="@style/Theme.AppCompat.DayNight.NoActionBar">
+
+        <!--
+          configChanges: rotation would otherwise recreate the activity and
+          reload the WebView, dropping whatever the user was in the middle of.
+        -->
+        <activity
+            android:name=".MainActivity"
+            android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden|uiMode"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
 </manifest>

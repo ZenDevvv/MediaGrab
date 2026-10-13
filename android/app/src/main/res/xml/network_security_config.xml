@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Cleartext is allowed to loopback and nowhere else.
+
+  The WebView loads the frontend from the embedded Ktor server at
+  http://127.0.0.1:{port}/, and from API 28 cleartext is blocked by default.
+  Turning it on app-wide would also cover yt-dlp's own traffic and anything the
+  page links to, so it is scoped to the one address the server binds.
+  (MULTI_PLATFORM_IMPLEMENTATION_PLAN.md §4 Component 4.)
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false" />
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">127.0.0.1</domain>
+    </domain-config>
+</network-security-config>

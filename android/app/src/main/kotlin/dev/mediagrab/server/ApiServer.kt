@@ -267,9 +267,12 @@ private suspend fun ApplicationCall.respondError(
     )
 }
 
-/** Start on an ephemeral loopback port and return the bound address. */
-fun ApiServer.start(wait: Boolean = false): EmbeddedServer<*, *> {
-    val server = embeddedServer(CIO, port = 0, host = "127.0.0.1", module = module())
+/**
+ * Start on loopback and return the server. [port] 0 picks an ephemeral port,
+ * which is what the tests want; the app asks for a fixed one (see Backend).
+ */
+fun ApiServer.start(wait: Boolean = false, port: Int = 0): EmbeddedServer<*, *> {
+    val server = embeddedServer(CIO, port = port, host = "127.0.0.1", module = module())
     server.start(wait = wait)
     return server
 }

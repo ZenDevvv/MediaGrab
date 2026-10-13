@@ -16,6 +16,23 @@ plugins {
  */
 val repoRoot = rootProject.layout.projectDirectory.dir("..").asFile
 
+/**
+ * The frontend, copied into the APK under `assets/web/`.
+ *
+ * Copied rather than pointing an asset srcDir at static/ directly: a bare
+ * srcDir lands the files at the top of the asset tree, where they mix with
+ * whatever the AARs contribute and the server's catch-all route would serve
+ * those too. The `web/` prefix keeps what is reachable over HTTP to exactly
+ * the frontend.
+ */
+val webAssetsRoot = layout.buildDirectory.dir("generated/webassets")
+val syncWebAssets by tasks.registering(Sync::class) {
+    from(File(repoRoot, "static")) {
+        exclude("**/README.md")
+    }
+    into(webAssetsRoot.map { it.dir("web") })
+}
+
 android {
     namespace = "dev.mediagrab"
     compileSdk = 35
@@ -41,6 +58,7 @@ android {
 
     sourceSets {
         getByName("main").java.srcDirs("src/main/kotlin")
+        getByName("main").assets.srcDir(webAssetsRoot.get().asFile)
         getByName("test").java.srcDirs("src/test/kotlin")
     }
 
@@ -58,6 +76,7 @@ android {
 dependencies {
     implementation("androidx.core:core-ktx:1.13.1")
     implementation("androidx.appcompat:appcompat:1.7.0")
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
 
     // The media engine. Resolved from the composite build in settings.gradle.kts,
     // not from a repository -- JitPack cannot build these. See §1.8 Decision #29.
@@ -94,3 +113,4 @@ tasks.withType<Test>().configureEach {
         showStandardStreams = false
     }
 }
+tasks.named("preBuild") { dependsOn(syncWebAssets) }
