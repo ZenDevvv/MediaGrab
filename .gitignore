@@ -40,6 +40,7 @@ wheels/
 
 # Desktop build artifacts
 ffmpeg/
+deno/
 _internal/
 MediaGrab.spec.bak
 *.spec.bak
@@ -64,3 +65,15 @@ htmlcov/
 .DS_Store
 Thumbs.db
 .env
+
+# Android build toolchain (M4) -- installed in-tree by dev/setup-android.sh so
+# cleanup is a single rm -rf and nothing touches the host system.
+.toolchain/
+.android/
+
+# Android (M4)
+android/.gradle/
+android/.kotlin/
+android/build/
+android/app/build/
+android/local.properties

@@ -59,6 +59,14 @@ class DownloadsResponse(BaseModel):
     linux_url: Optional[str] = None
     android_url: Optional[str] = None
 
+class JsRuntimeResponse(BaseModel):
+    # Configured names, and the subset that is actually installed. These differ
+    # on any machine where the JS runtime was never installed, which is exactly
+    # the case that otherwise fails silently.
+    configured: List[str] = Field(default_factory=list)
+    available: List[str] = Field(default_factory=list)
+    missing: List[str] = Field(default_factory=list)
+
 class CapabilitiesResponse(BaseModel):
     mode: Literal["desktop", "hosted"]
     # Running build version, so the settings panel can show it and the client
@@ -67,6 +75,7 @@ class CapabilitiesResponse(BaseModel):
     retention_seconds: int
     limits: LimitsResponse
     downloads: DownloadsResponse
+    js_runtimes: JsRuntimeResponse = Field(default_factory=JsRuntimeResponse)
 
 class JobProgressResponse(BaseModel):
     job_id: str

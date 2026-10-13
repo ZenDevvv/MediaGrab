@@ -15,6 +15,7 @@ from app.api.schemas import (
     DownloadsResponse,
     InfoRequest,
     InfoResponse,
+    JsRuntimeResponse,
     DownloadRequest,
     DownloadResponse,
     JobProgressResponse,
@@ -23,6 +24,7 @@ from app.api.schemas import (
 from app.config import CLEANUP_GRACE_SECONDS, ORPHAN_MAX_AGE_SECONDS
 from app.services.extractor import inspect_url, UpstreamBotCheck
 from app.services.jobs import job_manager
+from app.services import js_runtime
 from app.services.downloader import execute_download
 from app.services.cleaner import deferred_file_removal
 from app.services.downloads import release_urls
@@ -71,6 +73,7 @@ async def api_capabilities():
         retention_seconds=CLEANUP_GRACE_SECONDS,
         limits=limits,
         downloads=_release_urls(),
+        js_runtimes=JsRuntimeResponse(**js_runtime.runtime_status()),
     )
 
 

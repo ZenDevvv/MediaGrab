@@ -5,11 +5,15 @@ Build with:
     pyinstaller packaging/MediaGrab.spec --noconfirm
 
 Produces a one-directory bundle under dist/. One-directory rather than one-file
-because unpacking ~80MB of FFmpeg on every launch is slow and fragile, and
+because unpacking ~270MB of FFmpeg and Deno on every launch is slow and
+fragile, and
 antivirus software quarantines self-extracting archives far more aggressively.
 
 Expect FFmpeg to be present at packaging/../ffmpeg (see packaging/fetch_ffmpeg.py).
 Without it the app still launches but cannot merge, convert, or embed subtitles.
+
+Expect Deno to be present at packaging/../deno (see packaging/install_deno.py).
+Without it the app still launches but cannot solve YouTube's player challenge.
 """
 
 import sys
@@ -59,6 +63,18 @@ datas += [
     (str(ROOT / "static"), "static"),
 ]
 
+# GPL-3.0 s4 requires the license text and copyright notice to accompany the
+# work. Shipping the binary without LICENSE would make every release
+# non-compliant no matter what the repo says, so these are bundled and then
+# asserted on by CI.
+for legal in ("LICENSE", "NOTICE"):
+    path = ROOT / legal
+    if path.exists():
+        datas.append((str(path), "."))
+    else:
+        print(f"WARNING: {legal} not found at the repo root; the release will "
+              f"be non-compliant with GPL-3.0 section 4.")
+
 ffmpeg_dir = ROOT / "ffmpeg"
 if ffmpeg_dir.is_dir():
     # Enumerate the files explicitly rather than passing the directory: this
@@ -69,6 +85,20 @@ if ffmpeg_dir.is_dir():
         print("WARNING: ffmpeg/ exists but contains no files; "
               "run packaging/fetch_ffmpeg.py before building.")
     binaries += [(str(p), "ffmpeg") for p in ffmpeg_files]
+
+# Deno is the JS runtime yt-dlp needs for the YouTube player challenge. The
+# default YTDLP_JS_RUNTIMES is "deno", so a build shipped without it starts
+# fine and then quietly fails to extract from YouTube on the user's machine.
+deno_dir = ROOT / "deno"
+if deno_dir.is_dir():
+    deno_files = sorted(p for p in deno_dir.iterdir() if p.is_file())
+    if not deno_files:
+        print("WARNING: deno/ exists but contains no files; "
+              "run packaging/install_deno.py before building.")
+    binaries += [(str(p), "deno") for p in deno_files]
+else:
+    print("WARNING: deno/ not found; run packaging/install_deno.py before "
+          "building or YouTube extraction will be degraded.")
 
 a = Analysis(
     [str(ROOT / "run_desktop.py")],

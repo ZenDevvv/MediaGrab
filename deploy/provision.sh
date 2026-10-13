@@ -22,7 +22,7 @@ if command -v apt-get >/dev/null 2>&1; then
   export DEBIAN_FRONTEND=noninteractive
   apt-get update -qq
   apt-get install -y --no-install-recommends \
-    python3 python3-venv python3-pip ffmpeg curl ca-certificates rsync
+    python3 python3-venv python3-pip ffmpeg curl ca-certificates rsync unzip
 else
   log "WARN: non-Debian system; skipping package install"
 fi
@@ -49,6 +49,26 @@ python3 -m venv "$APP_DIR/venv"
 
 # --- runtime directories --------------------------------------------------
 mkdir -p "$APP_DIR/downloads"
+
+# --- Deno (yt-dlp JavaScript runtime) --------------------------------------
+# yt-dlp cannot solve YouTube's player challenge without a JS runtime, and the
+# app's default YTDLP_JS_RUNTIMES is "deno". A VM provisioned without this
+# starts, serves, and then fails to extract from YouTube -- the exact failure
+# the cookies and proxy below exist to prevent, reintroduced from the other end.
+DENO_BIN=/usr/local/bin/deno
+if ! command -v deno >/dev/null 2>&1; then
+  log "Installing Deno"
+  DENO_DIR=/usr/local/share/deno
+  "$APP_DIR/venv/bin/python" "$APP_DIR/packaging/install_deno.py" --out "$DENO_DIR"
+  ln -sf "$DENO_DIR/deno" "$DENO_BIN"
+fi
+if deno --version >/dev/null 2>&1; then
+  log "Deno present: $(deno --version | head -1)"
+else
+  # Not fatal: every other platform still works, and /api/capabilities now
+  # reports the missing runtime rather than hiding it.
+  log "WARN: Deno did not install; YouTube extraction will be degraded"
+fi
 
 # --- configuration --------------------------------------------------------
 # SESSION_SECRET must persist: without it every restart regenerates the key and
@@ -129,15 +149,27 @@ systemctl restart "$SERVICE_NAME"
 
 # --- readiness ------------------------------------------------------------
 log "Waiting for readiness"
+READY=0
 for i in $(seq 1 40); do
-  if curl -fsS "http://127.0.0.1:8000/api/capabilities" >/dev/null 2>&1; then
-    log "Ready."
-    curl -fsS "http://127.0.0.1:8000/api/capabilities" | head -c 400; echo
-    exit 0
+  if CAPS="$(curl -fsS "http://127.0.0.1:8000/api/capabilities" 2>/dev/null)"; then
+    READY=1
+    break
   fi
   sleep 1
 done
 
-log "ERROR: service did not become ready"
-journalctl -u "$SERVICE_NAME" -n 50 --no-pager || true
-exit 1
+if [ "$READY" -ne 1 ]; then
+  log "ERROR: service did not become ready"
+  journalctl -u "$SERVICE_NAME" -n 50 --no-pager || true
+  exit 1
+fi
+
+printf '%s\n' "$CAPS" | head -c 400; echo
+
+# The service being up says nothing about whether YouTube will work, so check
+# the runtime the way an operator would rather than discovering it from a
+# support ticket.
+if printf '%s' "$CAPS" | grep -q '"available":\[\]'; then
+  log "WARN: no JavaScript runtime available; YouTube extraction is degraded"
+  log "      fix: bash deploy/provision.sh, or install Deno on PATH"
+fi

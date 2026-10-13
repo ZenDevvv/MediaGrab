@@ -33,6 +33,9 @@ jobs:
       - name: Bundle FFmpeg
         run: python packaging/fetch_ffmpeg.py
 
+      - name: Bundle Deno
+        run: python packaging/install_deno.py
+
       - name: Stamp version
         shell: bash
         run: |
@@ -69,7 +72,21 @@ jobs:
           if (-not (Test-Path "$internal\ffmpeg\ffmpeg.exe")) {
             Write-Host "WARNING: bundled ffmpeg.exe missing; merge/MP3 will fail"
           }
+          # Not a warning: the app's default JS runtime is Deno, and without it
+          # every YouTube link fails on the user's machine while every other
+          # site keeps working, so it looks like a YouTube outage.
+          if (-not (Test-Path "$internal\deno\deno.exe")) {
+            throw "Missing bundled deno.exe; YouTube extraction would be broken"
+          }
           if (-not (Test-Path "dist\MediaGrab\MediaGrab.exe")) { throw "Executable missing" }
+          # GPL-3.0 s4: the licence text must accompany the binary. The repo
+          # can be correctly licensed and the release still non-compliant if
+          # these files are not in the bundle.
+          foreach ($legal in "LICENSE","NOTICE") {
+            if (-not (Test-Path "$internal\$legal")) {
+              throw "Missing $legal in the bundle; the release would violate GPL-3.0 s4"
+            }
+          }
 
       - name: Smoke test backend starts
         shell: pwsh
@@ -106,6 +123,16 @@ jobs:
             if ($p.HasExited) { Write-Host "Process exited with code $($p.ExitCode)" }
             else { Write-Host "Process still running but never served /api/capabilities" }
             throw "Windows backend failed to start"
+          }
+
+          # The bundled Deno has to be on PATH *inside the frozen app*, which
+          # only happens if the launcher prepends it. Asserting the bundle
+          # contains the file (earlier step) is not the same thing.
+          $caps = (Invoke-WebRequest -Uri "http://127.0.0.1:8099/api/capabilities" `
+            -UseBasicParsing -TimeoutSec 5).Content
+          if ($caps -notmatch '"available":\[[^\]]*"deno"') {
+            Write-Host $caps
+            throw "Bundled Deno not visible to the app; YouTube would be degraded"
           }
 
           try {
@@ -270,6 +297,9 @@ jobs:
       - name: Bundle FFmpeg
         run: python packaging/fetch_ffmpeg.py
 
+      - name: Bundle Deno
+        run: python packaging/install_deno.py
+
       - name: Stamp version
         shell: bash
         run: |
@@ -293,6 +323,26 @@ jobs:
       - name: Build
         run: pyinstaller packaging/MediaGrab.spec --noconfirm --distpath dist --workpath build
 
+      - name: Verify bundle completeness
+        run: |
+          # Symmetric with the Windows check. Deno is not optional: the app's
+          # default JS runtime, and without it YouTube fails on the user's
+          # machine while every other platform keeps working.
+          test -d dist/MediaGrab/_internal || { echo "Missing _internal directory"; exit 1; }
+          count=$(find dist/MediaGrab/_internal -type f | wc -l)
+          echo "Bundle contains $count files"
+          [ "$count" -ge 100 ] || { echo "Bundle looks incomplete ($count files)"; exit 1; }
+          test -x dist/MediaGrab/_internal/ffmpeg/ffmpeg || echo "WARNING: bundled ffmpeg missing"
+          test -x dist/MediaGrab/_internal/deno/deno || {
+            echo "Missing bundled deno; YouTube extraction would be broken"; exit 1; }
+          # GPL-3.0 s4: the licence text must accompany the binary. The repo
+          # can be correctly licensed and the release still non-compliant if
+          # these files are not in the bundle.
+          for legal in LICENSE NOTICE; do
+            test -f "dist/MediaGrab/_internal/$legal" || {
+              echo "Missing $legal in the bundle; the release would violate GPL-3.0 s4"; exit 1; }
+          done
+
       - name: Smoke test backend starts
         run: |
           chmod +x dist/MediaGrab/MediaGrab
@@ -305,6 +355,11 @@ jobs:
             sleep 1
           done
           grep -q '"desktop"' /tmp/caps.json || { echo "Unexpected capabilities payload"; cat /tmp/caps.json; exit 1; }
+          # The bundled Deno has to be on PATH *inside the frozen app*, which is
+          # only true if the launcher prepends it. Asserting the bundle contains
+          # the file (previous step) is not the same thing.
+          grep -q '"deno"' /tmp/caps.json || {
+            echo "Bundled Deno not visible to the app; YouTube would be degraded"; cat /tmp/caps.json; exit 1; }
           test -x dist/MediaGrab/_internal/ffmpeg/ffmpeg || echo "WARNING: bundled ffmpeg missing"
           kill $PID
           echo "Smoke test passed"

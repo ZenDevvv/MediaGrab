@@ -213,6 +213,34 @@ def prepend_bundled_ffmpeg() -> Optional[Path]:
     return None
 
 
+def prepend_bundled_deno() -> Optional[Path]:
+    """Put a bundled Deno on PATH so the JS runtime exists without setup.
+
+    Must run before anything imports app.services.js_runtime, which caches the
+    PATH lookup. run_desktop.py sets desktop env ahead of importing app.config
+    for exactly this reason and this joins it.
+
+    Returns the directory, or None. A system Deno already on PATH is left
+    alone -- the bundled copy is a floor, not a preference.
+    """
+    candidates = [
+        APP_ROOT / "deno",
+        APP_ROOT / "_internal" / "deno",
+        BASE_DIR / "deno",
+    ]
+    for candidate in candidates:
+        if not candidate.is_dir():
+            continue
+        binary = "deno.exe" if os.name == "nt" else "deno"
+        if not (candidate / binary).exists():
+            continue
+        if shutil.which("deno"):
+            return None
+        os.environ["PATH"] = str(candidate) + os.pathsep + os.environ.get("PATH", "")
+        return candidate
+    return None
+
+
 def start_server(port: int = 0) -> tuple:
     """Run uvicorn on loopback and return (server, thread, port).
 
@@ -402,9 +430,16 @@ def main() -> int:
 
     downloads = configure_downloads_dir()
     ffmpeg_dir = prepend_bundled_ffmpeg()
+    # Before start_server(), which imports app.main and therefore the runtime
+    # detection that caches the PATH.
+    deno_dir = prepend_bundled_deno()
 
     print(f"[MediaGrab] Downloads: {downloads}")
     print(f"[MediaGrab] FFmpeg:   {ffmpeg_dir or 'system PATH (postprocessing may fail)'}")
+    print(f"[MediaGrab] Deno:     {deno_dir or 'system PATH or absent (YouTube may be degraded)'}")
+    if deno_dir is None and not shutil.which("deno"):
+        print("[MediaGrab] WARNING: no Deno runtime found; run "
+              "packaging/install_deno.py or YouTube links may fail")
 
     server, thread, port = start_server(args.port)
     url = f"http://127.0.0.1:{port}"

@@ -1,0 +1,101 @@
+name: Tests
+
+# The build workflow is tag-triggered, so before this existed nothing ran the
+# test suite in CI at all: 235 tests exercised locally, zero on a pull request.
+# A green local run is not a gate -- it is a memory.
+on:
+  push:
+    branches:
+      - "**"
+    tags-ignore:
+      - "v*"
+  pull_request:
+  workflow_dispatch:
+
+# Read-only: this workflow never publishes.
+permissions:
+  contents: read
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: ${{ matrix.os }} / ${{ matrix.mode }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Both modes in full. Hosted is not a superset of desktop: the
+          # guardrails, the per-IP ceiling and the retention sweeper only
+          # exist in that mode, and a change that breaks them is invisible to
+          # a desktop-only run.
+          - { os: ubuntu-latest, mode: desktop }
+          - { os: ubuntu-latest, mode: hosted }
+          # Windows is here for run_desktop.py, which is the entry point CI
+          # builds and the one file with genuinely platform-specific paths
+          # (CSIDL_DOWNLOADS, the GUI-subsystem stdio guard).
+          - { os: windows-latest, mode: desktop }
+
+    env:
+      MEDIAGRAB_MODE: ${{ matrix.mode }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg
+          # Deno, so the JS runtime resolution is exercised against a real
+          # installed binary rather than always taking the missing path.
+          # Without it every test here would validate only the failure case.
+          python packaging/install_deno.py --out "$RUNNER_TEMP/deno"
+          echo "$RUNNER_TEMP/deno" >> "$GITHUB_PATH"
+
+      - name: Install Windows system dependencies
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          # ffmpeg via the bundled binary rather than a system install: the
+          # download tests exercise postprocessing, and CI already fetches the
+          # static build the desktop app ships.
+          python packaging/install_deno.py --out "$env:RUNNER_TEMP\deno"
+          Add-Content -Path $env:GITHUB_PATH -Value "$env:RUNNER_TEMP\deno"
+          if (-not (Test-Path "ffmpeg\ffmpeg.exe")) {
+            python packaging/fetch_ffmpeg.py
+          }
+          Add-Content -Path $env:GITHUB_PATH -Value (Join-Path $PWD "ffmpeg")
+
+      - name: Install browser for the end-to-end tests
+        if: runner.os == 'Linux'
+        run: |
+          # Three of the tests drive real Chromium over raw CDP and silently
+          # skip when chromium is absent. On a runner that has no browser they
+          # would skip rather than fail, so CI would report green coverage it
+          # does not have.
+          sudo apt-get install -y --no-install-recommends chromium-browser || \
+            sudo apt-get install -y --no-install-recommends chromium
+          chromium --version || chromium-browser --version
+          node --version
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run the suite
+        run: python -m pytest tests/ -v --tb=short
+
+      - name: Report JS runtime resolution
+        run: |
+          # Cheap, and it turns "YouTube stopped working" into a one-line diff.
+          python -c "from app.services.js_runtime import runtime_status; print(runtime_status())"
