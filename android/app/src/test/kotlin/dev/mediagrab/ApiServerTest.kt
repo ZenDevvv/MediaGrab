@@ -170,4 +170,36 @@ class ApiServerTest {
             limits.isNull("max_file_size_bytes") && limits.isNull("max_duration_seconds"),
         )
     }
+
+    @Test
+    fun `events stream JSON frames shaped like the Python server's`() {
+        val id = json("/api/download", """{"url":"x"}""").getString("job_id")
+        engine.jobs[id] = engine.jobs.getValue(id).copy(status = "ready", size = "1.2 MB")
+        val body = get("/api/events/$id")
+
+        val frames = body.trim().split("\n\n")
+        assertEquals("one terminal frame, then the stream ends: $body", 1, frames.size)
+        val (event, data) = frames.single().lines()
+        assertEquals("event: complete", event)
+        // Every data line must parse: the frontend JSON.parses them all.
+        val payload = JSONObject(data.removePrefix("data: "))
+        assertEquals("output.mp4", payload.getString("filename"))
+        assertEquals("/api/file/$id", payload.getString("download_url"))
+        assertFalse("complete carries file fields only", payload.has("status"))
+    }
+
+    @Test
+    fun `a cancelled job ends the stream with an error frame, not complete`() {
+        val id = json("/api/download", """{"url":"x"}""").getString("job_id")
+        engine.jobs[id] = engine.jobs.getValue(id).copy(status = "cancelled")
+        val frame = get("/api/events/$id").trim()
+        assertTrue(frame, frame.startsWith("event: error\n"))
+        assertEquals("Download cancelled", JSONObject(frame.substringAfter("data: ")).getString("error"))
+    }
+
+    @Test
+    fun `events for an unknown job is a 404 rather than an endless stream`() {
+        val status = runBlocking { client.get("$base/api/events/nope").status.value }
+        assertEquals(404, status)
+    }
 }

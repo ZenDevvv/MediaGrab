@@ -49,6 +49,27 @@ android {
         ndk { abiFilters += listOf("arm64-v8a") }
     }
 
+    buildTypes {
+        getByName("debug") {
+            // Debug also carries x86_64 so it runs natively on the emulator.
+            // The x86_64 system images can translate arm64 apps, but not this
+            // one: the library spawns python with LD_LIBRARY_PATH pointing at
+            // its own arm64 libandroid.so, and the translation runner (an
+            // x86_64 binary) inherits that and fails to link. Release builds
+            // stay arm64-only, so the size budget is unaffected.
+            ndk { abiFilters += listOf("x86_64") }
+        }
+    }
+
+    packaging {
+        // youtubedl-android unpacks libpython.zip.so and friends from the
+        // app's native library directory, so they must exist there as files.
+        // Since AGP 3.6 they stay compressed inside the APK by default and the
+        // directory is empty: init fails with ENOENT on libpython.zip.so, found
+        // on the first emulator run. Costs install size, not download size.
+        jniLibs { useLegacyPackaging = true }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17

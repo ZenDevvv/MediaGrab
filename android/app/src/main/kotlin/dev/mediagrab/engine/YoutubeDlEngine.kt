@@ -108,6 +108,10 @@ class YoutubeDlEngine(
             addOption("--newline")
             addOption("--no-playlist")
             addOption("--no-warnings")
+            // yt-dlp otherwise stamps the file with the upload date. That buries
+            // it in date-sorted file pickers, and it is the mtime desktop's
+            // own discovery once tripped over.
+            addOption("--no-mtime")
             // Same player-client policy as the desktop app, so both produce
             // the same formats for the same URL. Divergence here would mean
             // the chooser showing options that then fail.
@@ -117,7 +121,14 @@ class YoutubeDlEngine(
                 "mp3" -> {
                     addOption("-x")
                     addOption("--audio-format", "mp3")
-                    job.download.bitrate?.let { addOption("--audio-quality", (it / 1000).toString()) }
+                    // Bitrate arrives in kbps (192), as desktop's preferredquality
+                    // takes it. It was divided by 1000 here, which yielded "0" --
+                    // yt-dlp's best-VBR setting -- so every choice was ignored.
+                    addOption("--audio-quality", "${job.download.bitrate ?: 192}K")
+                    // Tags and cover art, as desktop's FFmpegMetadata and
+                    // EmbedThumbnail postprocessors add them.
+                    addOption("--embed-metadata")
+                    addOption("--embed-thumbnail")
                 }
                 "srt" -> {
                     // Subtitles only: --skip-download with no video format keeps
@@ -130,7 +141,13 @@ class YoutubeDlEngine(
                 }
                 else -> {
                     addOption("-f", formatSelector(job.download.quality))
-                    job.download.quality?.let { addOption("--merge-output-format", "mp4") }
+                    addOption("--merge-output-format", "mp4")
+                    job.download.subtitles?.takeIf { it.embed }?.let { subs ->
+                        addOption("--write-subs")
+                        addOption("--write-auto-subs")
+                        addOption("--sub-langs", subs.lang)
+                        addOption("--embed-subs")
+                    }
                 }
             }
             job.download.trim?.let { trim ->
@@ -157,19 +174,34 @@ class YoutubeDlEngine(
         // the desktop build (ARCHITECTURE.md §7.3); do not repeat it.
         val produced = findProducedFile(job)
         job.filename = produced?.name
-        job.size = produced?.length()?.toString()
+        job.size = produced?.length()?.let(::formatSize)
         job.status = "ready"
     }
 
+    /**
+     * The job's output. Each job writes into its own directory, so whatever is
+     * there belongs to it -- no mtime heuristics. The largest file wins, which
+     * skips a stray thumbnail or sidecar subtitle left beside the media.
+     */
     private fun findProducedFile(job: MutableJob): File? =
-        downloadDir.listFiles()
-            ?.filter { it.isFile && !it.name.startsWith(".") }
-            ?.maxByOrNull { it.lastModified() }
-            ?.takeIf { it.lastModified() >= job.startedAt }
+        job.dir.listFiles()
+            ?.filter { it.isFile && !it.name.startsWith(".") && !it.name.endsWith(".part") }
+            ?.maxByOrNull { it.length() }
 
     /** Highest resolution the user asked for, or the best available. */
-    private fun formatSelector(quality: String?): String =
-        "bestvideo[height<=${quality?.removeSuffix("p")?.toIntOrNull() ?: 1080}]+bestaudio/best"
+    /**
+     * Desktop's chain (app/services/downloader.py): H.264 MP4 + M4A first, so
+     * the result remuxes and plays everywhere, and only then anything within
+     * the height. The bare bestvideo+bestaudio it replaces picked AV1 + Opus
+     * on the first emulator run, which many phone players will not open.
+     */
+    private fun formatSelector(quality: String?): String {
+        val h = quality?.removeSuffix("p")?.toIntOrNull() ?: 1080
+        return "bestvideo[height<=$h][ext=mp4]+bestaudio[ext=m4a]/" +
+            "bestvideo[height<=$h]+bestaudio/" +
+            "best[height<=$h][ext=mp4]/" +
+            "best[height<=$h]/best"
+    }
 
     override fun progress(jobId: String): JobProgressResponse? =
         jobs[jobId]?.let { job ->
@@ -199,9 +231,15 @@ class YoutubeDlEngine(
     private class MutableJob(
         val id: String,
         val download: DownloadRequest,
-        private val dir: File,
+        parent: File,
     ) {
-        val startedAt = System.currentTimeMillis()
+        /**
+         * One directory per job. The template used to be the URL's last path
+         * segment, so every YouTube link became "watch.mp4": a second grab of
+         * the same video was skipped as already downloaded and reported no
+         * file, and two concurrent jobs would have written the same path.
+         */
+        val dir = File(parent, id)
         @Volatile var status: String = "queued"
         @Volatile var progress: Int = 0
         @Volatile var filename: String? = null
@@ -209,7 +247,7 @@ class YoutubeDlEngine(
         @Volatile var error: String? = null
 
         val outputTemplate: String
-            get() = File(dir, safeStem(download.url)).absolutePath
+            get() = File(dir, "%(title).150B.%(ext)s").absolutePath
     }
 
     /**
@@ -235,12 +273,12 @@ class YoutubeDlEngine(
 /** Resolutions offered in the chooser. */
 private val STANDARD = listOf(240, 360, 480, 720, 1080, 1440, 2160)
 
-/** A filesystem-safe stem derived from the URL, for the output template. */
-private fun safeStem(url: String): String =
-    url.substringAfterLast('/').substringBefore('?')
-        .ifBlank { "mediagrab" }
-        .replace(Regex("[^A-Za-z0-9._-]"), "_")
-        .take(80)
+/** Same rendering as desktop's `format_size`, which the ready card displays. */
+internal fun formatSize(bytes: Long): String {
+    if (bytes <= 0) return "-- MB"
+    val mb = bytes / (1024.0 * 1024.0)
+    return if (mb >= 10) "${Math.round(mb)} MB" else String.format(java.util.Locale.ROOT, "%.1f MB", mb)
+}
 
 /**
  * Map yt-dlp's `-J` output onto [InfoResponse].

@@ -13,6 +13,7 @@ import android.webkit.WebViewClient
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 /**
@@ -58,6 +59,11 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch {
             val url = try {
                 (application as MediaGrabApp).backend.await()
+            } catch (e: CancellationException) {
+                // The activity went away while waiting -- WebView's first load
+                // relaunches it on some versions. Not a failure; the new
+                // instance awaits the same backend.
+                throw e
             } catch (t: Throwable) {
                 Log.e("MediaGrab", "backend failed to start", t)
                 webView.loadData(FAILED_PAGE, "text/html", "utf-8")

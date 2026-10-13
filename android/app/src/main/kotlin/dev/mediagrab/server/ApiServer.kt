@@ -4,6 +4,7 @@ import dev.mediagrab.contract.CapabilitiesResponse
 import dev.mediagrab.contract.DownloadRequest
 import dev.mediagrab.contract.DownloadsResponse
 import dev.mediagrab.contract.ErrorDetail
+import dev.mediagrab.contract.JobProgressResponse
 import dev.mediagrab.contract.JsRuntimeResponse
 import dev.mediagrab.contract.LimitsResponse
 import dev.mediagrab.engine.Engine
@@ -28,6 +29,8 @@ import io.ktor.server.routing.post
 import io.ktor.server.routing.routing
 import kotlinx.coroutines.delay
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 
 /**
  * The embedded server the WebView talks to.
@@ -134,6 +137,11 @@ private fun Route.installApiRoutes(
     // Server-sent events. The frontend subscribes here for live throughput.
     get("/api/events/{jobId}") {
         val jobId = call.parameters["jobId"].orEmpty()
+        // As in Python: an unknown job is a 404, not a stream that never ends.
+        if (engine.progress(jobId) == null) {
+            call.respondError(HttpStatusCode.NotFound, "Job not found")
+            return@get
+        }
         call.respondTextWriter(contentType = ContentType.Text.EventStream) {
             var last: String? = null
             // Poll rather than push: the engine owns the download threads, and
@@ -142,17 +150,13 @@ private fun Route.installApiRoutes(
             while (true) {
                 val state = engine.progress(jobId)
                 if (state != null) {
-                    val payload = state.toString()
-                    if (payload != last) {
-                        write("event: progress\ndata: $payload\n\n")
+                    val frame = sseFrame(state)
+                    if (frame != last) {
+                        write(frame)
                         flush()
-                        last = payload
+                        last = frame
                     }
-                    if (state.status in TERMINAL_STATUSES) {
-                        write("event: complete\ndata: $payload\n\n")
-                        flush()
-                        break
-                    }
+                    if (state.status in TERMINAL_STATUSES) break
                 }
                 delay(400)
             }
@@ -173,6 +177,39 @@ private fun Route.installApiRoutes(
 }
 
 private val TERMINAL_STATUSES = setOf("ready", "error", "cancelled")
+
+/**
+ * One SSE frame, shaped exactly as `api_events` in app/api/routes.py emits it:
+ * `complete` carries the file fields, `error` covers both failure and
+ * cancellation, and anything else is `progress`. The frontend JSON.parses
+ * every `data:` line, so this must be JSON -- it once sent the data class's
+ * toString(), which the contract tests could not see (SSE is not in the
+ * OpenAPI document) and which the UI survived only by falling back to polling.
+ */
+internal fun sseFrame(state: JobProgressResponse): String {
+    val (event, data) = when (state.status) {
+        "ready" -> "complete" to buildJsonObject {
+            put("filename", state.filename)
+            put("size", state.size)
+            put("download_url", state.downloadUrl)
+            put("srt_filename", state.srtFilename)
+            put("srt_url", state.srtUrl)
+        }
+        "error" -> "error" to buildJsonObject { put("error", state.error ?: "Unknown failure") }
+        "cancelled" -> "error" to buildJsonObject { put("error", "Download cancelled") }
+        else -> "progress" to buildJsonObject {
+            put("status", state.status)
+            put("progress", state.progress)
+            put("speed", state.speed)
+            put("eta", state.eta)
+            put("got", state.got)
+            put("stage", state.stage)
+            put("queue_position", state.queuePosition)
+            put("active_slots", state.activeSlots)
+        }
+    }
+    return "event: $event\ndata: $data\n\n"
+}
 
 private fun Route.installAssetRoutes(assets: WebAssets) {
     val pages = mapOf(
