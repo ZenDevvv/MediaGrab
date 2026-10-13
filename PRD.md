@@ -109,6 +109,7 @@ migration path between them.
 | D4 | Zero configuration; no env vars, no prompts | launcher defaults |
 | D5 | Window fallback chain if the native window cannot open | launcher |
 | D6 | Bundle FFmpeg so postprocessing works on a clean machine | `fetch_ffmpeg.py` |
+| D7 | Bundle the JS runtime yt-dlp needs, so YouTube works on a clean machine | `install_deno.py` |
 
 ---
 
@@ -123,7 +124,7 @@ migration path between them.
 | N5 | Real-browser UI coverage | Met — headless Chromium via CDP |
 | N6 | < 1 s local page load | Unmeasured |
 | N7 | Windows binary verified | **Met** — run end to end on a real Windows machine; Facebook and YouTube downloads both complete |
-| N8 | Licence obligations satisfied before public distribution | **Not met** — GPL-3.0 FFmpeg unresolved |
+| N8 | Licence obligations satisfied before public distribution | **Met** — project relicensed to GPL-3.0-or-later so bundling GPL-licensed FFmpeg is compliant; `LICENSE` + `NOTICE` ship in every bundle and are verified in CI |
 
 ---
 
@@ -160,7 +161,6 @@ migration path between them.
 |---|---|---|
 | Windows binary never manually verified | Users get a broken download | **Open** — CI builds it; maintainer has a Windows VM |
 | No installer; extraction required | Friction vs. a true one-click install | Accepted for now |
-| GPL-3.0 bundled FFmpeg | Cannot publish binaries without obligations | **Open** — blocks distribution |
 | Session rate limiting untested under real NAT | Shared-IP users may still collide | **Open** — needs multi-user staging |
 | Hosted instance never run multi-user | First real deploy will surface unknown bugs | **Open** |
 | `BEHIND_PROXY` misconfigured | Rate limit trivially bypassed | Mitigated by documentation; unenforced |

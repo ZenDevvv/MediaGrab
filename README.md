@@ -38,9 +38,18 @@ Runs three ways from one codebase: a **hosted web instance** with guardrails and
 # Bundle a static FFmpeg (required for merge, MP3, subtitles, trimming)
 python packaging/fetch_ffmpeg.py
 
+# Bundle Deno, the JavaScript runtime yt-dlp needs for the player challenge
+python packaging/install_deno.py
+
 # Produce dist/MediaGrab/
 python -m PyInstaller packaging/MediaGrab.spec --noconfirm --distpath dist
 ```
+
+Both fetches are optional in the sense that the build still completes without
+them, but not in the sense that they are optional in practice: without FFmpeg
+most downloads cannot be produced, and without Deno YouTube extraction fails
+while every other site keeps working — which looks like a YouTube outage rather
+than a missing dependency. `pyinstaller` warns if `deno/` is absent.
 
 ### Run it
 
@@ -48,7 +57,7 @@ python -m PyInstaller packaging/MediaGrab.spec --noconfirm --distpath dist
 
 **Linux:** download `MediaGrab-Linux-x86_64.tar.gz`, extract it, run `./MediaGrab/MediaGrab`.
 
-No configuration, environment variables, or setup of any kind is required — the launcher sets its own safe defaults, finds your Downloads folder automatically, and bundles FFmpeg.
+No configuration, environment variables, or setup of any kind is required — the launcher sets its own safe defaults, finds your Downloads folder automatically, and bundles FFmpeg and Deno.
 
 ```bash
 # Optional flags
@@ -72,11 +81,13 @@ The launcher degrades rather than failing: `pywebview` (native, uses the WebView
 
 - **No installer yet.** You download, extract, and run. There is no `Setup.exe`, AppImage, or Start Menu entry. That is acceptable for extraction but not yet a true one-click install.
 - **No published releases yet**, so download links from a hosted instance do not currently resolve.
-- **Licensing:** the bundled FFmpeg is a **GPL-3.0** build (BtbN). Redistributing these binaries carries GPL-3.0 obligations. Do not publish binaries until this is resolved.
 
 ### CI
 
-`.github/workflows/build-desktop.yml` builds Windows (`.exe`) and Linux (`.tar.gz`) on `v*` tags, smoke-tests the backend on both runners, and attaches artifacts to the GitHub release. Trigger manually via **workflow_dispatch**.
+Two workflows:
+
+- **`tests.yml`** — runs the full pytest suite on every push and pull request, on ubuntu (desktop mode), ubuntu (hosted mode), and Windows. Installs Chromium and Deno so the browser E2E tests and the JS-runtime tests run for real rather than skipping.
+- **`build-desktop.yml`** — builds Windows (`.exe`) and Linux (`.tar.gz`) on `v*` tags, smoke-tests the backend and a real download on both runners, verifies the bundle contents, and attaches artifacts to the GitHub release. Trigger manually via **workflow_dispatch**.
 
 ---
 
@@ -86,6 +97,7 @@ The launcher degrades rather than failing: `pywebview` (native, uses the WebView
 
 - Python 3.10+ (tested on Python 3.13 & 3.14)
 - `ffmpeg` installed and available on PATH
+- Deno on PATH — `python packaging/install_deno.py` fetches one; it is what yt-dlp uses to solve YouTube's player challenge. Without it every other platform still works, which is exactly why its absence is easy to miss. `GET /api/capabilities` reports `js_runtimes.available` so a deployment can be checked rather than guessed at.
 - [`uv`](https://github.com/astral-sh/uv) (recommended) or `pip`
 
 ### 1. Run with `uv` (desktop mode, unlimited, files retained)
@@ -203,7 +215,7 @@ YouTube will answer **`Sign in to confirm you're not a bot`** from a datacenter 
 
 An independent published measurement agrees: *16 public videos from a Hetzner address → 0/16; the same binary behind a trusted address → 22/22.*
 
-**MediaGrab already handles everything handleable in code:** the PO-token-dependent `web`/`mweb` clients are excluded, Deno is installed for the player challenge, and the extractor and downloader share one option builder. What remains needs infrastructure:
+**MediaGrab already handles everything handleable in code:** the PO-token-dependent `web`/`mweb` clients are excluded, Deno is installed for the player challenge (by `deploy/provision.sh`, by the Docker image, and bundled into the desktop app — with `js_runtimes.available` in `/api/capabilities` so you can confirm it rather than assume it), and the extractor and downloader share one option builder. What remains needs infrastructure:
 
 **Lever 1 — cookies (free, temporary).** Export a logged-out cookie set from a real browser:
 
@@ -262,6 +274,7 @@ MediaGrab/
 │       ├── scheduler.py     # 3-slot FIFO queue with session + IP gates
 │       ├── metadata.py      # Cached inspection and hosted guardrails
 │       ├── network.py       # Client IP + signed session identity
+│       ├── js_runtime.py    # Which configured JS runtimes are actually installed
 │       ├── cleaner.py       # Retention daemon & deferred file removal
 │       └── templates.py     # Server-side mg-mode injection
 ├── static/                  # Frontend (PWA shell + hosted gating)
@@ -269,8 +282,10 @@ MediaGrab/
 ├── run_desktop.py           # Desktop launcher with window fallbacks
 ├── packaging/
 │   ├── MediaGrab.spec       # PyInstaller build definition
-│   └── fetch_ffmpeg.py      # Static FFmpeg bundler
+│   ├── fetch_ffmpeg.py      # Static FFmpeg bundler
+│   └── install_deno.py      # Static Deno bundler (yt-dlp JS runtime)
 ├── .github/workflows/
+│   ├── tests.yml            # pytest on push + PR: ubuntu desktop, ubuntu hosted, Windows
 │   └── build-desktop.yml    # Windows + Linux builds on tags
 ├── MULTI_PLATFORM_IMPLEMENTATION_PLAN.md  # Architecture, decisions, milestones
 ├── DESIGN.md                # Design system specification
@@ -281,6 +296,30 @@ MediaGrab/
 
 ## License
 
-MIT
+**GNU General Public License v3.0 or later.** Full text in [`LICENSE`](LICENSE); attribution and the third-party component inventory in [`NOTICE`](NOTICE).
 
-> Bundled FFmpeg binaries are **GPL-3.0** (BtbN builds) and are covered by that licence, not MIT. `yt-dlp` is Unlicense; `youtubedl-android` (Android client) is GPL-3.0.
+MediaGrab was originally MIT-licensed. It is now GPL-3.0-or-later because the
+bundled FFmpeg is a GPL build: shipping a GPL binary alongside MIT-licensed code
+puts the licensing of the combined distribution in doubt. Rather than resolve
+that ambiguity, the project adopted the more restrictive license so the answer
+is unambiguous. Every Python dependency is GPL-3.0-compatible; `NOTICE` lists
+them with the one exception worth noting, `mutagen`, which is
+GPL-2.0-**or-later** and therefore compatible at version 3.
+
+Copies already distributed under MIT remain under MIT — MIT grants are
+irreversible and cannot be withdrawn.
+
+Third-party components redistributed in releases:
+
+| Component | License | Why it is bundled |
+|---|---|---|
+| [FFmpeg](https://ffmpeg.org/) (BtbN static builds) | **GPL-3.0-or-later** | Merge, MP3 conversion, subtitle embedding, trimming. Not optional |
+| [Deno](https://deno.com/) | Apache-2.0 | The JavaScript runtime yt-dlp needs to solve YouTube's player challenge |
+| [yt-dlp](https://github.com/yt-dlp/yt-dlp) | Unlicense | The downloader itself |
+
+FFmpeg is invoked as a separate executable process and is not linked into the
+MediaGrab source. Releases ship `LICENSE` and `NOTICE` alongside the binaries;
+see `docs/OPERATIONS.md` §3.6 for the per-release source-commit record.
+
+> **The Android client (`youtubedl-android`, Milestone 4) is GPL-3.0**, which is
+> consistent with the above and introduces no further obligation.

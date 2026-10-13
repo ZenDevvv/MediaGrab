@@ -10,16 +10,21 @@ we redistribute; see the licensing note in README before publishing.
 """
 
 import argparse
-import os
+import hashlib
+import json
 import platform
+import re
 import stat
+import subprocess
 import sys
 import tarfile
 import urllib.request
 import zipfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 BASE_URL = "https://github.com/BtbN/FFmpeg-Builds/releases/latest/download"
+RELEASE_API = "https://api.github.com/repos/BtbN/FFmpeg-Builds/releases/latest"
 TARGET_DIR = Path(__file__).resolve().parent.parent / "ffmpeg"
 
 
@@ -79,6 +84,82 @@ def extract(asset: str, archive: Path, out_dir: Path) -> Path:
     raise SystemExit(f"ffmpeg binary not found after extracting {asset}")
 
 
+def write_provenance(out_dir: Path) -> Path:
+    """Record which FFmpeg source this binary corresponds to.
+
+    GPL-3.0 s4 obliges the distributor to offer the complete corresponding
+    source for the FFmpeg it ships. BtbN publishes that source per release, but
+    `releases/latest` is a moving tag: the asset name that resolves today
+    resolves to a different build tomorrow, and the record of what a given
+    binary actually was would be gone.
+
+    So pin what can be pinned. The FFmpeg commit is read out of the binary via
+    `ffmpeg -version`, so it describes what is actually shipped rather than
+    what the build script believed at the time. Nothing here is a manual step,
+    and nothing here is allowed to fail a build.
+    """
+    binary_name = "ffmpeg.exe" if sys.platform == "win32" else "ffmpeg"
+    binary = out_dir / binary_name
+    asset, _prefix = target_asset()
+
+    digest = hashlib.sha256(binary.read_bytes()).hexdigest()
+    resolved_tag = "unknown"
+    try:
+        with urllib.request.urlopen(RELEASE_API, timeout=30) as response:
+            resolved_tag = json.load(response).get("tag_name", "unknown")
+    except Exception as exc:  # provenance must never block a build
+        resolved_tag = f"unresolved ({exc})"
+
+    # `ffmpeg -version` prints the exact upstream FFmpeg commit it was built
+    # from, in the form "N-127507-g24e860f6d3-20261013". That is a far
+    # stronger answer to "which source corresponds to this binary" than the
+    # BtbN release tag, which is a moving tag that resolves to something else
+    # tomorrow. Record both the raw build string and the bare git hash, which
+    # is the part that forms a valid commit URL.
+    build = "unknown"
+    commit = ""
+    try:
+        result = subprocess.run(
+            [str(binary), "-version"], capture_output=True, text=True, timeout=30
+        )
+        if result.returncode == 0 and result.stdout:
+            build = result.stdout.splitlines()[0].split()[2]
+            match = re.search(r"-g([0-9a-f]{7,40})", build)
+            if match:
+                commit = match.group(1)
+    except Exception as exc:
+        build = f"unresolved ({exc})"
+
+    upstream_url = (
+        f"https://github.com/FFmpeg/FFmpeg/commit/{commit}"
+        if commit
+        else "https://github.com/FFmpeg/FFmpeg"
+    )
+
+    provenance = out_dir / "PROVENANCE.txt"
+    provenance.write_text(
+        "FFmpeg binary bundled with MediaGrab\n"
+        "==================================\n\n"
+        f"ffmpeg build   {build}\n"
+        f"ffmpeg commit  {commit or 'unresolved'}\n"
+        f"asset          {asset}\n"
+        f"sha256         {digest}\n"
+        f"release tag    {resolved_tag}  (as resolved {datetime.now(timezone.utc).date()})\n"
+        f"binary source  {BASE_URL}/{asset}\n"
+        f"source code    https://github.com/BtbN/FFmpeg-Builds/releases/tag/{resolved_tag}\n"
+        f"upstream       {upstream_url}\n"
+        f"licence        GPL-3.0-or-later (built with --enable-gpl)\n\n"
+        "'ffmpeg commit' is the FFmpeg commit this binary was built from, and\n"
+        "is the corresponding source for GPL-3.0 section 4. It is read from\n"
+        "the binary itself, so it cannot drift from what is shipped.\n\n"
+        "MediaGrab is distributed under GPL-3.0-or-later. FFmpeg is invoked as\n"
+        "a separate executable process and is not linked into MediaGrab.\n"
+        "See NOTICE in the MediaGrab repository.\n",
+        encoding="utf-8",
+    )
+    return provenance
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--out", default=str(TARGET_DIR))
@@ -90,6 +171,15 @@ def main() -> int:
     binary_name = "ffmpeg.exe" if sys.platform == "win32" else "ffmpeg"
     if (out_dir / binary_name).exists() and not args.force:
         print(f"[ffmpeg] Already present at {out_dir / binary_name}")
+        # Still write provenance. Skipping the download is a reason not to
+        # re-fetch, not a reason to skip the GPL-3.0 s4 obligation -- and this
+        # is the path taken by any developer who ran the fetcher before
+        # provenance existed, which is how a release ends up shipping a binary
+        # whose corresponding source cannot be identified.
+        if (out_dir / "PROVENANCE.txt").exists():
+            print("[ffmpeg] Provenance already recorded")
+        else:
+            print(f"[ffmpeg] Provenance written to {write_provenance(out_dir)}")
         return 0
 
     asset, _prefix = target_asset()
@@ -97,6 +187,7 @@ def main() -> int:
     try:
         download(asset, archive)
         path = extract(asset, archive, out_dir)
+        provenance = write_provenance(out_dir)
     finally:
         if archive.exists() and archive != out_dir / binary_name:
             try:
@@ -105,6 +196,7 @@ def main() -> int:
                 pass
 
     print(f"[ffmpeg] Installed {path}")
+    print(f"[ffmpeg] Provenance written to {provenance}")
     return 0
 
 

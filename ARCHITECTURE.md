@@ -68,20 +68,24 @@ MediaGrab/
 │       ├── downloads.py         Download targets, per-platform availability
 │       ├── youtube_circuit.py   Cooldown gate for outbound YouTube requests
 │       ├── ytdlp_opts.py        Shared yt-dlp options for inspect + download
+│       ├── js_runtime.py        Which configured JS runtimes are installed
 │       └── logpaths.py          Launcher log + browser profile locations
 ├── static/                      index.html, choose.html, downloads.html, app.js
 ├── run_desktop.py               Launcher; window fallback chain; log binding
 ├── packaging/
 │   ├── MediaGrab.spec           PyInstaller onedir build
-│   └── fetch_ffmpeg.py          Static FFmpeg bundler
+│   ├── fetch_ffmpeg.py          Static FFmpeg bundler
+│   └── install_deno.py          Static Deno bundler (yt-dlp JS runtime)
 ├── deploy/
 │   ├── provision.sh             Idempotent VM provisioning
 │   ├── push.sh                  Working tree → VM → restart → readiness probe
 │   ├── mediagrab.service        systemd unit (hosted, retention on)
 │   └── mg-tunnel.service        Cloudflare quick tunnel (fallback ingress only)
 ├── docs/OPERATIONS.md           Deploy, release, and incident runbook
-├── tests/                       225 tests incl. headless-Chromium E2E
-└── .github/workflows/build-desktop.yml
+├── tests/                       253 tests incl. headless-Chromium E2E
+└── .github/workflows/
+    ├── tests.yml                pytest on push/PR: desktop, hosted, Windows
+    └── build-desktop.yml        Frozen builds on tags
 ```
 
 ---
@@ -447,12 +451,28 @@ while the Windows job failed. Unverified builds are now never published.
 | Backend starts (piped) | Import/boot failures |
 | **No-console launch** (no redirection) | The windowed-stdio crash. A launch *with* redirection hands the child real handles, so `sys.stdout` is never `None` and the bug cannot appear |
 | **A real download** | Everything in §7.3. Served from a committed 17 KB fixture over a local HTTP server — an earlier version used YouTube and failed because CI addresses trip the same bot check |
+| **JS runtime visible in `/api/capabilities`** | A bundle that contains `deno` but never puts it on `PATH`. Distinct from checking the file exists: the assertion is made against the running app, which is the only place the launcher's prepend can be observed |
+
+### 10.4 Tests run on every push, not only on tags
+
+The build workflow is tag-triggered, so nothing executed the test suite in CI
+until `tests.yml` was added: 253 tests ran locally and zero ran on a pull
+request. A green local run is not a gate, it is a memory.
+
+`tests.yml` runs the full suite on ubuntu (desktop mode), ubuntu (hosted mode)
+and Windows on every push and pull request. All three are load-bearing — hosted
+is not a superset of desktop, because the guardrails, the per-IP ceiling and the
+retention sweeper exist only in that mode; Windows is where `run_desktop.py`
+exercises its genuinely platform-specific paths. The Linux job installs
+Chromium and Deno, without which three browser tests would skip (reporting green
+coverage the run does not have) and every runtime-resolution test would validate
+only the missing-binary path.
 
 ---
 
 ## 11. Testing
 
-225 tests, green in both modes:
+253 tests, green in both modes:
 
 ```bash
 uv run pytest -q                              # desktop
@@ -475,7 +495,7 @@ intercepted so no real media is fetched.
 | Session forgery | HMAC-SHA256, `hmac.compare_digest`, 128-bit random IDs |
 | Session cookie theft | `HttpOnly`, `SameSite=Lax`, `Secure` on HTTPS |
 | Size-cap evasion | Pre-flight estimate is server-computed; `--max-filesize` is only a coarse backstop |
-| Downloaded code | FFmpeg is **GPL-3.0** (BtbN), not covered by the repo's MIT licence |
+| Downloaded code | FFmpeg is **GPL-3.0-or-later** (BtbN static builds). The project is licensed GPL-3.0-or-later specifically so bundling it is compliant rather than ambiguous; `LICENSE` and `NOTICE` ship in every release |
 | Secrets | `SESSION_SECRET` read from env; never committed. `.env` is gitignored. |
 | Diagnostic endpoints | `/api/diagnostics/*` are desktop-only and answer `404` on hosted |
 

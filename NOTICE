@@ -1,0 +1,125 @@
+MediaGrab
+Copyright (C) 2026 ZenDevvv
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later
+version.
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License along with
+this program. If not, see <https://www.gnu.org/licenses/>.
+
+The complete corresponding source code is available at:
+
+    https://github.com/ZenDevvv/MediaGrab
+
+MediaGrab is distributed under the GNU General Public License, version 3 or
+later. This was a deliberate change: the bundled FFmpeg is a GPL build, and
+publishing a bundle that combines GPL-licensed FFmpeg with MIT-licensed code
+put the whole distribution's licensing in doubt. See the "License" section of
+README.md for the history.
+
+
+-------------------------------------------------------------------------------
+THIRD-PARTY COMPONENTS BUNDLED IN RELEASES
+-------------------------------------------------------------------------------
+
+The desktop build and the Docker image bundle the following third-party
+components. They are redistributed under their own terms, reproduced below.
+
+
+FFmpeg  (https://ffmpeg.org/)
+  License:  GPL-3.0-or-later
+  Upstream source: https://github.com/FFmpeg/FFmpeg
+  Binary builds:  https://github.com/BtbN/FFmpeg-Builds/releases
+
+  Static builds are produced by BtbN with --enable-gpl, which makes the result
+  GPL-licensed rather than LGPL. BtbN publishes the complete corresponding
+  source for every build alongside each release.
+
+  The exact FFmpeg commit corresponding to any shipped binary is recorded in
+  ffmpeg/PROVENANCE.txt inside the release bundle, written automatically by
+  packaging/fetch_ffmpeg.py. It reads the commit out of `ffmpeg -version`, so
+  it cannot drift from the binary that is actually shipped:
+
+      ffmpeg build   N-127507-g24e860f6d3-20261013
+      ffmpeg commit  24e860f6d3
+      sha256         68a315dd...
+
+  FFmpeg's own COPYING is available at:
+      https://github.com/FFmpeg/FFmpeg/blob/master/COPYING
+
+  FFmpeg is invoked by MediaGrab as a separate executable process; it is not
+  linked into the MediaGrab source.
+
+
+Deno  (https://deno.com/)
+  License:  Apache-2.0
+  Source:   https://github.com/denoland/deno
+  Binary:   https://github.com/denoland/deno/releases/latest
+
+  Required by yt-dlp to solve YouTube's player challenge; see
+  app/services/js_runtime.py. Apache-2.0 is compatible with GPL-3.0.
+
+
+yt-dlp  (https://github.com/yt-dlp/yt-dlp)
+  License:  Unlicense (public domain)
+  Source:   https://github.com/yt-dlp/yt-dlp
+
+
+yt-dlp Android  (https://github.com/ytdl-org/youtubedl-android)
+  License:  GPL-3.0
+  Source:   https://github.com/ytdl-org/youtubedl-android
+
+  Applies to the Android client (MULTI_PLATFORM_IMPLEMENTATION_PLAN.md,
+  Milestone 4). Not currently shipped.
+
+
+-------------------------------------------------------------------------------
+PYTHON DEPENDENCIES
+-------------------------------------------------------------------------------
+
+All runtime and build dependencies are compatible with GPL-3.0. Every license
+below is GPL-3.0-compatible by construction; `mutagen` is GPL-2.0-or-later,
+which the "or later" clause permits at version 3.
+
+    mutagen                 GPL-2.0-or-later
+    altgraph                MIT
+    annotated-doc           MIT
+    annotated-types         MIT
+    anyio                   MIT
+    bottle                  MIT
+    certifi                 MPL-2.0        (GPL-compatible per MPL-2.0 s3.3)
+    click                   BSD-3-Clause
+    fastapi                 MIT
+    h11                     MIT
+    httpcore                BSD-3-Clause
+    httptools               MIT
+    httpx                   BSD-3-Clause
+    idna                    BSD-3-Clause
+    mutagen                 GPL-2.0-or-later
+    opentelemetry-api       Apache-2.0
+    proxy_tools             MIT
+    pydantic                MIT
+    pydantic-core           MIT
+    PyYAML                  MIT
+    pywebview               BSD-3-Clause
+    pytest                  MIT
+    pytest-asyncio          Apache-2.0
+    setuptools              MIT
+    starlette               BSD-3-Clause
+    typing-inspection       MIT
+    typing_extensions       PSF-2.0
+    uvicorn                 BSD-3-Clause
+    uvloop                  MIT
+    watchfiles              MIT
+    websockets              BSD-3-Clause
+    yt-dlp                  Unlicense
+
+    pythonnet               MIT            (Windows only)
+    clr_loader              MIT            (Windows only)
+    PyInstaller             GPL-2.0-or-later with a bundling exception

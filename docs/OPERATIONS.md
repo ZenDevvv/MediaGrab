@@ -230,9 +230,40 @@ build now fails on an empty version rather than shipping one.
 | Backend starts (piped) | Boot and import failures |
 | **No-console launch** | The windowed-stdio crash. A *redirected* launch hands the child real handles, so `sys.stdout` is never `None` and the bug cannot appear under test |
 | **A real download** | Output-location, template and post-processing defects. Uses a committed fixture over a local HTTP server — an earlier version used YouTube and failed because CI addresses trip the same bot check |
+| **JS runtime reported by `/api/capabilities`** | A bundle containing `deno` that never puts it on `PATH`. Asserted against the running app, since that is the only place the launcher's prepend is observable |
 
 Startup tests alone passed through three releases in which every desktop
 download was broken.
+
+**The JS runtime is not optional.** yt-dlp cannot solve YouTube's player
+challenge without a JavaScript runtime, and `YTDLP_JS_RUNTIMES` defaults to
+`deno`. Nothing used to install it: not the Dockerfile, not `provision.sh`, not
+CI, and not the PyInstaller bundle. Each of those produced a binary that
+started, served requests, and then failed to extract from YouTube.
+
+The symptom is deceptive. Every other platform keeps working, so it presents as
+a YouTube outage rather than a missing dependency, and yt-dlp's only complaint
+is a warning in its own log that nothing here surfaces.
+
+Three things keep it from recurring, and all three should be checked when
+triaging anything YouTube-shaped:
+
+```bash
+# 1. Is it installed and on PATH?
+command -v deno
+
+# 2. What does the app think? (configured vs available vs missing)
+curl -s localhost:8000/api/capabilities | python3 -m json.tool | grep -A5 js_runtimes
+
+# 3. Does the frozen desktop build contain it?
+ls dist/MediaGrab/_internal/deno/
+```
+
+`packaging/install_deno.py` installs it standalone; the Dockerfile,
+`provision.sh` and both CI build jobs call it, and the launcher prepends the
+bundled copy to `PATH` before importing anything that caches the lookup. The
+readiness check at the end of `provision.sh` reports an empty
+`js_runtimes.available` as a warning rather than letting it pass silently.
 
 ### 3.5 Moving a tag
 
@@ -248,6 +279,34 @@ git tag -a v0.1.9 -m "..." && git push origin v0.1.9
 Do this only for a release that is minutes old and has no consumers. Once a tag
 is public and in use, cut a new version instead — the existing tag keeps
 pointing at the old commit, which is what makes it trustworthy.
+
+### 3.6 Licensing is part of the release, not a separate concern
+
+MediaGrab is **GPL-3.0-or-later**. It bundles a GPL FFmpeg build, which is why
+the project took the more restrictive license rather than resolve the ambiguity
+of shipping GPL binaries alongside MIT code.
+
+Every release must therefore carry the license text (GPL-3.0 §4 requires the
+license to accompany the work). CI fails the build if `LICENSE` or `NOTICE` is
+missing from the bundle — a repo that is correctly licensed can still produce a
+non-compliant release if the files are not shipped, so the check is on the
+artifact rather than on the repository.
+
+Nothing needs to be filled in by hand. `packaging/fetch_ffmpeg.py` writes
+`ffmpeg/PROVENANCE.txt` at packaging time, recording the FFmpeg commit read out
+of the binary itself:
+
+```bash
+grep -A4 'ffmpeg commit' dist/MediaGrab/_internal/ffmpeg/PROVENANCE.txt
+```
+
+That file is the answer to "which source corresponds to this binary," which is
+what GPL §4 obliges you to offer. It is read from `ffmpeg -version` rather than
+pinned in the script, so it cannot drift from what is actually shipped.
+
+If a release is ever built from FFmpeg binaries obtained some other way, that
+provenance file will be absent and the obligation is unmet — that is the case to
+catch before tagging, not after.
 
 ---
 
@@ -339,6 +398,7 @@ npx freestyle@latest vm exec mediagrab -- bash -lc \
 | *"Too many requests" on a YouTube link | Check the circuit breaker state (§6) |
 | *"That link didn't work" on a working URL | Check whether the video is longer than the hosted cap, and whether the session or IP gate is full |
 | Downloads missing after a restart | Confirm `DOWNLOADS_PUBLISHED` includes the platform, and that the file is in the real Downloads folder rather than inside the app bundle |
+| **YouTube fails but every other site works** | The JS runtime is missing. See §3.4 — check `js_runtimes.available` before suspecting the circuit breaker or the cookies |
 
 ### 5.4 Reproducing a desktop-only bug
 
