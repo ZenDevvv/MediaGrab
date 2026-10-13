@@ -115,7 +115,7 @@ def test_license_and_notice_are_bundled_into_the_release():
     Checking the repository is not enough. A build that drops these produces a
     non-compliant release from a correctly-licensed source tree.
     """
-    spec = (ROOT / "packaging" / "MediaGrab.spec").read_text()
+    spec = (ROOT / "packaging" / "MediaGrab.spec").read_text(encoding="utf-8")
     assert "LICENSE" in spec and "NOTICE" in spec
     assert "GPL-3.0 s4" in spec or "section 4" in spec, (
         "the reason these files are bundled must be recorded next to the code"
@@ -124,7 +124,7 @@ def test_license_and_notice_are_bundled_into_the_release():
 
 def test_ci_fails_when_the_license_is_missing_from_the_bundle():
     """Same reason, enforced where it matters: on the artifact."""
-    workflow = (ROOT / ".github" / "workflows" / "build-desktop.yml").read_text()
+    workflow = (ROOT / ".github" / "workflows" / "build-desktop.yml").read_text(encoding="utf-8")
     assert "LICENSE" in workflow and "NOTICE" in workflow
 
     build_desktop = workflow[workflow.index("  windows:"):]
@@ -144,7 +144,7 @@ def test_ffmpeg_provenance_records_the_corresponding_source():
     resolves to a different build tomorrow. Without a recorded commit, the
     answer to "what source is this binary" is unrecoverable a year later.
     """
-    fetch = (ROOT / "packaging" / "fetch_ffmpeg.py").read_text()
+    fetch = (ROOT / "packaging" / "fetch_ffmpeg.py").read_text(encoding="utf-8")
     assert "PROVENANCE.txt" in fetch
     # Read from the binary, not hardcoded: a hardcoded pin rots silently the
     # moment upstream publishes a new build.
@@ -159,7 +159,7 @@ def test_legal_files_are_not_gitignored(archive):
     """A .gitignore pattern that swallows LICENSE is a silent compliance
     failure: the file exists locally, passes every local check, and is absent
     from the repo everyone clones."""
-    ignored = (ROOT / ".gitignore").read_text()
+    ignored = (ROOT / ".gitignore").read_text(encoding="utf-8")
     patterns = [
         line.strip()
         for line in ignored.splitlines()

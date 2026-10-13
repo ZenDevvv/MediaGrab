@@ -1454,5 +1454,5 @@ def test_log_path_is_defined_once_and_shared():
 
     root = Path(__file__).resolve().parent.parent
     assert launcher_log_path().name == "launcher.log"
-    assert "launcher_log_path" in (root / "run_desktop.py").read_text()
-    assert "app.services.logpaths" in (root / "app" / "api" / "routes.py").read_text()
+    assert "launcher_log_path" in (root / "run_desktop.py").read_text(encoding="utf-8")
+    assert "app.services.logpaths" in (root / "app" / "api" / "routes.py").read_text(encoding="utf-8")

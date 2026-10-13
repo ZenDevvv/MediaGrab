@@ -192,7 +192,7 @@ def test_extracted_binary_is_executable():
 
 def test_installer_is_not_committed_binary_output():
     """The fetched binary is a build artifact, not source."""
-    ignored = (ROOT / ".gitignore").read_text()
+    ignored = (ROOT / ".gitignore").read_text(encoding="utf-8")
     assert "deno/" in ignored
 
 
@@ -202,7 +202,7 @@ def test_installer_is_not_committed_binary_output():
 def test_docker_image_installs_deno():
     """The image is the hosted deployment. A container without a JS runtime
     cannot extract from YouTube at all."""
-    dockerfile = (ROOT / "Dockerfile").read_text()
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
     assert "install_deno.py" in dockerfile, "Dockerfile must install the JS runtime"
     # Not just fetched: it has to be reachable from PATH, or shutil.which
     # inside the app will not see it.
@@ -211,7 +211,7 @@ def test_docker_image_installs_deno():
 
 def test_provision_script_installs_deno():
     """An ephemeral VM is provisioned from this script alone."""
-    provision = (ROOT / "deploy" / "provision.sh").read_text()
+    provision = (ROOT / "deploy" / "provision.sh").read_text(encoding="utf-8")
     assert "install_deno.py" in provision
     # And it must verify rather than assume: `set -e` makes a failed install
     # abort, but a successful download of the wrong asset would not.
@@ -220,12 +220,12 @@ def test_provision_script_installs_deno():
 
 def test_provision_readiness_check_reports_a_missing_runtime():
     """The service starting is not evidence YouTube works. Say so."""
-    provision = (ROOT / "deploy" / "provision.sh").read_text()
+    provision = (ROOT / "deploy" / "provision.sh").read_text(encoding="utf-8")
     assert '"available":\\[\\]' in provision or "js_runtimes" in provision
 
 
 def test_pyinstaller_spec_bundles_deno():
-    spec = (ROOT / "packaging" / "MediaGrab.spec").read_text()
+    spec = (ROOT / "packaging" / "MediaGrab.spec").read_text(encoding="utf-8")
     assert "deno" in spec
     # Symmetric with ffmpeg: warn loudly rather than producing a bundle that
     # looks fine and cannot solve the player challenge.
@@ -239,7 +239,7 @@ def test_launcher_puts_bundled_deno_on_path_before_importing_config():
     call is invisible for the life of the process. prepend_bundled_deno() must
     therefore run before start_server() imports app.main.
     """
-    launcher = (ROOT / "run_desktop.py").read_text()
+    launcher = (ROOT / "run_desktop.py").read_text(encoding="utf-8")
 
     assert "def prepend_bundled_deno(" in launcher
     assert "_internal" in launcher, "must find the frozen onedir layout"
@@ -255,7 +255,7 @@ def test_launcher_puts_bundled_deno_on_path_before_importing_config():
 def test_ci_builds_install_and_verify_deno():
     """The bundle assertions are the only thing standing between a release and
     a YouTube-broken build."""
-    workflow = (ROOT / ".github" / "workflows" / "build-desktop.yml").read_text()
+    workflow = (ROOT / ".github" / "workflows" / "build-desktop.yml").read_text(encoding="utf-8")
     assert workflow.count("install_deno.py") >= 2, "both build jobs must install Deno"
     assert "_internal/deno" in workflow, "Linux job must verify the bundled binary"
     assert "deno.exe" in workflow, "Windows job must verify the bundled binary"
@@ -268,7 +268,7 @@ def test_ci_runs_the_test_suite():
         "There must be a workflow that runs pytest; the build workflow only "
         "runs on tags, so nothing tests a pull request"
     )
-    body = tests_workflow.read_text()
+    body = tests_workflow.read_text(encoding="utf-8")
     assert "pytest" in body
     # Both modes, because the guardrails only exist in hosted.
     assert "MEDIAGRAB_MODE=hosted" in body or "hosted" in body

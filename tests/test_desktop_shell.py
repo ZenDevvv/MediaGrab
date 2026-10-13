@@ -258,7 +258,7 @@ def test_ffmpeg_fetch_script_present():
 def test_workflow_covers_both_platforms():
     import yaml
 
-    wf = yaml.safe_load(Path(".github/workflows/build-desktop.yml").read_text())
+    wf = yaml.safe_load(Path(".github/workflows/build-desktop.yml").read_text(encoding="utf-8"))
     # windows and linux build; publish is the gated job that ships their
     # artifacts, so it is expected alongside them.
     assert {"windows", "linux"} <= set(wf["jobs"])
@@ -481,7 +481,7 @@ def test_windows_release_ships_the_whole_bundle():
     """The .exe alone cannot run; the release must ship a zip of the bundle."""
     import yaml
 
-    wf = yaml.safe_load(Path(".github/workflows/build-desktop.yml").read_text())
+    wf = yaml.safe_load(Path(".github/workflows/build-desktop.yml").read_text(encoding="utf-8"))
     steps = yaml.safe_dump(wf["jobs"]["windows"])
 
     # A bare .exe attachment is the defect this guards against.
@@ -495,7 +495,7 @@ def test_windows_build_verifies_bundle_and_extractors():
     """CI must fail on an incomplete bundle or missing yt-dlp extractors."""
     import yaml
 
-    wf = yaml.safe_load(Path(".github/workflows/build-desktop.yml").read_text())
+    wf = yaml.safe_load(Path(".github/workflows/build-desktop.yml").read_text(encoding="utf-8"))
     steps = yaml.safe_dump(wf["jobs"]["windows"])
     assert "_internal" in steps, "Bundle completeness is not verified"
     assert "api/info" in steps, "yt-dlp extractor bundling is not verified"
@@ -504,7 +504,7 @@ def test_windows_build_verifies_bundle_and_extractors():
 
 def test_pythonnet_present_for_windows_gui():
     """pywebview needs pythonnet on Windows or the native window cannot open."""
-    reqs = Path("requirements.txt").read_text()
+    reqs = Path("requirements.txt").read_text(encoding="utf-8")
     assert "pywebview" in reqs
     assert "pythonnet" in reqs, \
         "Windows build would ship without pythonnet and cannot open a window"
@@ -534,7 +534,7 @@ def test_launcher_requires_no_user_configuration():
 
 def test_provision_script_is_idempotent_and_generates_secret():
     """Freestyle VMs may be ephemeral, so provisioning must be re-runnable."""
-    script = Path("deploy/provision.sh").read_text()
+    script = Path("deploy/provision.sh").read_text(encoding="utf-8")
     assert "SESSION_SECRET" in script, "Must persist SESSION_SECRET across restarts"
     # Preserved rather than regenerated, or every restart resets gate history.
     assert "Keeping existing" in script
@@ -550,7 +550,7 @@ def test_systemd_does_not_try_to_create_its_own_sandbox_path():
     ExecStartPre runs, so an ExecStartPre mkdir fails with 226/NAMESPACE and the
     service never starts. The directory must be created by provisioning instead.
     """
-    unit = Path("deploy/mediagrab.service").read_text()
+    unit = Path("deploy/mediagrab.service").read_text(encoding="utf-8")
     directives = [
         line.strip() for line in unit.splitlines()
         if line.strip() and not line.strip().startswith("#")
@@ -559,7 +559,7 @@ def test_systemd_does_not_try_to_create_its_own_sandbox_path():
         "Sandbox paths are resolved before ExecStartPre; creating them there fails"
     assert "226/NAMESPACE" in unit, "Must document why the dir is created externally"
 
-    provision = Path("deploy/provision.sh").read_text()
+    provision = Path("deploy/provision.sh").read_text(encoding="utf-8")
     assert 'mkdir -p "$APP_DIR/downloads"' in provision or \
            'mkdir -p "$REMOTE_DIR/downloads"' in provision or \
            'mkdir -p /opt/mediagrab/downloads' in provision, \
@@ -567,7 +567,7 @@ def test_systemd_does_not_try_to_create_its_own_sandbox_path():
 
 
 def test_systemd_unit_runs_hosted_with_retention():
-    unit = Path("deploy/mediagrab.service").read_text()
+    unit = Path("deploy/mediagrab.service").read_text(encoding="utf-8")
     assert "MEDIAGRAB_MODE=hosted" in unit
     assert "RETENTION_ENABLED=true" in unit, \
         "Hosted output directory must be swept; without this files accumulate"
@@ -578,7 +578,7 @@ def test_systemd_unit_runs_hosted_with_retention():
 
 def test_push_script_requires_explicit_credentials():
     """The API key must never be hardcoded or committed."""
-    script = Path("deploy/push.sh").read_text()
+    script = Path("deploy/push.sh").read_text(encoding="utf-8")
     assert "FREESTYLE_API_KEY" in script
     assert "not authenticated" in script, "Must fail loudly when unauthenticated"
     assert "freestyle@latest login" in script, "Must tell the user how to authenticate"
@@ -589,7 +589,7 @@ def test_push_script_does_not_hardcode_a_wrong_team_id():
 
     Deploying with it silently targeted a nonexistent team.
     """
-    script = Path("deploy/push.sh").read_text()
+    script = Path("deploy/push.sh").read_text(encoding="utf-8")
     assert "acct-00a8ab64d7974b278232fad8bf8b95c0" not in script, \
         "Stale/incorrect team id must not be committed"
     assert 'TEAM_ID="${TEAM_ID:-}"' in script, \
@@ -603,14 +603,14 @@ def test_push_script_does_not_hardcode_a_wrong_team_id():
 
 def test_coming_soon_page_exists_and_is_routed():
     assert Path("static/downloads.html").exists()
-    assert "Not published yet" in Path("static/downloads.html").read_text()
-    src = Path("app/main.py").read_text()
+    assert "Not published yet" in Path("static/downloads.html").read_text(encoding="utf-8")
+    src = Path("app/main.py").read_text(encoding="utf-8")
     assert '"/downloads"' in src, "Landing page must be routed"
 
 
 def test_promo_strip_does_not_force_download_attr_on_page_link():
     """`download` on a page link saves the HTML instead of navigating."""
-    js = Path("static/js/app.js").read_text()
+    js = Path("static/js/app.js").read_text(encoding="utf-8")
     assert "isRealDownload" in js
     assert "removeAttribute('download')" in js
 
@@ -635,7 +635,7 @@ def test_retention_copy_is_not_hardcoded():
 
 def test_tunnel_unit_is_committed_and_loopback_only():
     """Cloudflare quick tunnel must front loopback, never expose 0.0.0.0."""
-    unit = Path("deploy/mg-tunnel.service").read_text()
+    unit = Path("deploy/mg-tunnel.service").read_text(encoding="utf-8")
     assert "127.0.0.1:8000" in unit, "Tunnel must target loopback"
     assert "0.0.0.0" not in unit
     assert "cloudflared" in unit
@@ -647,7 +647,7 @@ def test_tunnel_is_not_coupled_to_app_restarts():
     Stopping mediagrab stopped the tunnel, which re-registered under a new
     random trycloudflare hostname and broke every shared link (Error 1033).
     """
-    unit = Path("deploy/mg-tunnel.service").read_text()
+    unit = Path("deploy/mg-tunnel.service").read_text(encoding="utf-8")
     directives = [l.strip() for l in unit.splitlines()
                   if l.strip() and not l.strip().startswith("#")]
     assert not any(d.startswith("Requires=") for d in directives), \
@@ -658,8 +658,8 @@ def test_tunnel_is_not_coupled_to_app_restarts():
 
 def test_ytdlp_client_and_runtime_policy():
     """YouTube client/JS-runtime policy is centralised and PO-token safe."""
-    src = Path("app/services/ytdlp_opts.py").read_text()
-    cfg = Path("app/config.py").read_text()
+    src = Path("app/services/ytdlp_opts.py").read_text(encoding="utf-8")
+    cfg = Path("app/config.py").read_text(encoding="utf-8")
 
     assert "base_ytdl_opts" in src, "Extractor and downloader must share yt-dlp options"
     assert "player_client" in src
@@ -673,24 +673,24 @@ def test_ytdlp_client_and_runtime_policy():
     assert '"tv_embedded,default,android_vr"' in cfg
 
     # Both call sites use the shared builder, so they cannot drift.
-    assert "base_ytdl_opts()" in Path("app/services/downloader.py").read_text()
-    assert "base_ytdl_opts(" in Path("app/services/extractor.py").read_text()
+    assert "base_ytdl_opts()" in Path("app/services/downloader.py").read_text(encoding="utf-8")
+    assert "base_ytdl_opts(" in Path("app/services/extractor.py").read_text(encoding="utf-8")
 
 
 def test_cookie_path_is_configurable_and_not_committed():
     """YouTube cookies must come from config and never be committed."""
-    cfg = Path("app/config.py").read_text()
+    cfg = Path("app/config.py").read_text(encoding="utf-8")
     assert "MEDIA_GRAB_YTDLP_COOKIES" in cfg
-    src = Path("app/services/ytdlp_opts.py").read_text()
+    src = Path("app/services/ytdlp_opts.py").read_text(encoding="utf-8")
     assert "cookiefile" in src
     # No literal cookie path or contents in the repo.
-    assert "cookies.txt" not in Path("app/config.py").read_text()
+    assert "cookies.txt" not in Path("app/config.py").read_text(encoding="utf-8")
 
 
 def test_youtube_egress_levers_are_configurable():
     """Cookie, proxy and impersonation are the three real levers; all opt-in."""
-    cfg = Path("app/config.py").read_text()
-    src = Path("app/services/ytdlp_opts.py").read_text()
+    cfg = Path("app/config.py").read_text(encoding="utf-8")
+    src = Path("app/services/ytdlp_opts.py").read_text(encoding="utf-8")
 
     for var in ("MEDIA_GRAB_YTDLP_COOKIES", "MEDIA_GRAB_YTDLP_PROXY",
                 "MEDIA_GRAB_YTDLP_IMPERSONATE"):
@@ -711,7 +711,7 @@ def test_youtube_egress_levers_are_configurable():
 
 def test_cookie_install_script_is_safe_and_validating():
     """Cookies are a live credential: validate format, lock permissions."""
-    script = Path("deploy/install-cookies.sh").read_text()
+    script = Path("deploy/install-cookies.sh").read_text(encoding="utf-8")
     assert "install -m 600" in script, "Cookie file must be 0600"
     assert "mkdir -p" in script, "Must create the cookie dir on a fresh host"
     assert "-o root -g root" in script
@@ -724,7 +724,7 @@ def test_cookie_install_script_is_safe_and_validating():
 
 
 def test_provision_wires_cookies_and_proxy():
-    src = Path("deploy/provision.sh").read_text()
+    src = Path("deploy/provision.sh").read_text(encoding="utf-8")
     assert "MEDIA_GRAB_YTDLP_COOKIES" in src
     assert "/etc/mediagrab/ytdlp-cookies.txt" in src
     assert "MEDIA_GRAB_YTDLP_PROXY" in src
@@ -733,7 +733,7 @@ def test_provision_wires_cookies_and_proxy():
 
 
 def test_cookie_files_are_gitignored():
-    ignore = Path(".gitignore").read_text()
+    ignore = Path(".gitignore").read_text(encoding="utf-8")
     for pattern in ("cookies.txt", "*-cookies.txt", "ytdlp-cookies.txt"):
         assert pattern in ignore, f"{pattern} must be gitignored"
 
@@ -742,7 +742,7 @@ def test_no_cookie_or_proxy_secrets_committed():
     """No literal cookie contents or proxy credentials in the repo."""
     for name in ("app/config.py", ".env.example", "deploy/provision.sh",
                  "deploy/install-cookies.sh"):
-        text = Path(name).read_text()
+        text = Path(name).read_text(encoding="utf-8")
         # Assignments and examples only; no real host/user:pass credentials.
         for line in text.splitlines():
             s = line.strip()
@@ -943,7 +943,7 @@ def test_window_lifetime_is_not_capped_by_a_fixed_timeout():
 
 def test_pythonnet_is_bundled_for_the_native_window():
     """pywebview imports pythonnet dynamically, so PyInstaller cannot see it."""
-    spec = (Path(__file__).resolve().parent.parent / "packaging" / "MediaGrab.spec").read_text()
+    spec = (Path(__file__).resolve().parent.parent / "packaging" / "MediaGrab.spec").read_text(encoding="utf-8")
     assert '"pythonnet"' in spec
     assert '"clr_loader"' in spec
     assert '"clr"' in spec
@@ -1042,12 +1042,12 @@ def test_history_lifetime_copy_is_not_hardcoded():
 
 
 def test_open_downloads_button_exists_and_is_hidden_by_default():
-    html = (Path(__file__).resolve().parent.parent / "static" / "index.html").read_text()
+    html = (Path(__file__).resolve().parent.parent / "static" / "index.html").read_text(encoding="utf-8")
     assert 'id="btn-open-downloads"' in html
     assert 'id="btn-open-downloads" type="button" hidden' in html
     assert "Open Downloads folder" in html
 
-    js = (Path(__file__).resolve().parent.parent / "static" / "js" / "app.js").read_text()
+    js = (Path(__file__).resolve().parent.parent / "static" / "js" / "app.js").read_text(encoding="utf-8")
     start = js.index("function wireOpenDownloads")
     body = js[start:js.index("function renderHistory", start)]
     assert "isHostedMode()" in body, "hosted must hide it, not show a dead control"

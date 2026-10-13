@@ -625,7 +625,7 @@ def test_section_and_decision_references_resolve():
     import re
 
     root = pathlib.Path(__file__).resolve().parent.parent
-    plan = (root / "MULTI_PLATFORM_IMPLEMENTATION_PLAN.md").read_text()
+    plan = (root / "MULTI_PLATFORM_IMPLEMENTATION_PLAN.md").read_text(encoding="utf-8")
     plan_sections = set(re.findall(r"^#{2,4} (\d+(?:\.\d+)?)\b", plan, re.M))
 
     cache = {}
@@ -678,8 +678,8 @@ def test_section_and_decision_references_resolve():
 def test_architecture_states_no_longer_false_claims():
     import pathlib
     root = pathlib.Path(__file__).resolve().parent.parent
-    arch = (root / "ARCHITECTURE.md").read_text()
-    readme = (root / "README.md").read_text()
+    arch = (root / "ARCHITECTURE.md").read_text(encoding="utf-8")
+    readme = (root / "README.md").read_text(encoding="utf-8")
 
     # Windows is now manually verified.
     assert "not yet manually verified" not in readme
@@ -698,7 +698,7 @@ def test_env_example_documents_every_public_setting():
 
     root = Path(__file__).resolve().parent.parent
     example = root / ".env.example"
-    text = example.read_text()
+    text = example.read_text(encoding="utf-8")
     documented = set(re.findall(r"^([A-Z][A-Z0-9_]*)=", text, re.M))
 
     # Settings a deployer may plausibly need to change.
@@ -725,8 +725,8 @@ def test_env_example_documents_every_public_setting():
 def test_design_system_documents_the_new_components():
     import pathlib
     root = pathlib.Path(__file__).resolve().parent.parent
-    design = (root / "DESIGN.md").read_text()
-    css = (root / "static" / "css" / "app.css").read_text()
+    design = (root / "DESIGN.md").read_text(encoding="utf-8")
+    css = (root / "static" / "css" / "app.css").read_text(encoding="utf-8")
 
     for component, selector in (
         ("retention notice", ".save-notice"),
@@ -747,7 +747,7 @@ def test_prd_status_table_is_current():
     import re
     from pathlib import Path
 
-    prd = (Path(__file__).resolve().parent.parent / "PRD.md").read_text()
+    prd = (Path(__file__).resolve().parent.parent / "PRD.md").read_text(encoding="utf-8")
 
     # Windows verification happened; the row must not still claim otherwise.
     n7 = next(l for l in prd.splitlines() if l.startswith("| N7"))
@@ -767,7 +767,7 @@ def test_operations_does_not_document_a_nonexistent_cli_flag():
     """
     import pathlib
     root = pathlib.Path(__file__).resolve().parent.parent
-    ops = (root / "docs" / "OPERATIONS.md").read_text()
+    ops = (root / "docs" / "OPERATIONS.md").read_text(encoding="utf-8")
 
     # Named only in order to say it does not work.
     assert "--set auto-delete-seconds" not in ops or "What does *not* work" in ops
@@ -828,7 +828,7 @@ def test_open_folder_still_works_when_enabled(monkeypatch):
 def test_e2e_servers_disable_os_open_and_isolate_downloads():
     """Guards the fixture, not just the endpoint."""
     source = Path(__file__).resolve().parent
-    text = (source / "test_ui_dom.py").read_text()
+    text = (source / "test_ui_dom.py").read_text(encoding="utf-8")
     fixture = text[text.index("def _server(mode"):text.index("def live_server")]
     assert '"MEDIA_GRAB_OS_OPEN": "false"' in fixture
     assert '"MEDIA_GRAB_DOWNLOADS_DIR"' in fixture
