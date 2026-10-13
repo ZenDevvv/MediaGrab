@@ -578,8 +578,8 @@ Gradle 8.9 and the Android SDK under `.toolchain/`, and `android/` builds a sign
 the toolchain compiles. See §1.8 for what the first real build revealed.
 
 1. Initialize `android/` project structure with Gradle wrapper and AndroidManifest, `arm64-v8a` only. **Done** as a smoke scaffold.
-2. Integrate `youtubedl-android` + FFmpeg, and bundle the web assets into APK assets. **Rewritten** — must be a composite build, not a dependency (§1.8 Decision #29).
-3. Implement embedded Ktor micro-server (**CIO engine**) bridging `/api/` calls to `YoutubeDL` **and** serving the bundled web assets. Must answer with the shapes in `openapi-contract.json` (§1.8 Decision #31).
+2. Integrate `youtubedl-android` + FFmpeg, and bundle the web assets into APK assets. **Done** — consumed as a composite build (§1.8 Decision #29), engine behind an `Engine` interface so the HTTP surface is JVM-testable. Debug APK **59 MB** against the 90–120 MB budget, arm64-v8a only.
+3. Implement embedded Ktor micro-server (**CIO engine**) bridging `/api/` calls to `YoutubeDL` **and** serving the bundled web assets. **Done** for the `/api/` bridge, asset serving and SSE; `/api/file/{job_id}` streaming and `MediaStore` saving are step 5. Validated against `openapi-contract.json` (§1.8 Decision #31).
 4. Add loopback-scoped `network_security_config.xml` so the WebView can load cleartext `127.0.0.1` (§4 Component 4).
 5. Implement Foreground Service and `MediaStore.Downloads` saving.
 6. Verify the APK against the **90–120 MB** budget before release; publish with GPL-3.0 compliance (§1.1, §1.8 Decision #32).
