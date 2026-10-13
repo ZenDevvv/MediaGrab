@@ -225,6 +225,75 @@ and are revealed after the mode is known. Hidden rather than disabled, and hidde
 *before* JavaScript runs so they never flash on the public site — the same
 fail-closed pattern as the hosted promo strip.
 
+### 1.8 Android Toolchain, Dependency Reality & the Pinned API Contract
+
+Recorded 2026-10-13, immediately before Milestone 4 begins. Three findings from
+standing up a real build, each of which changes how the milestone is carried out.
+
+**Decision #29 — `youtubedl-android` is built from source, not resolved as a
+dependency.** The coordinate previously recorded here (`io.github.junkfood02.…`)
+never existed, and the current one is not obtainable either. The project is
+`com.github.yausername:youtubedl-android` on JitPack, and **every version
+returns 404**: 0.18.1, 0.18.0, 0.17.4, 0.16.0, 0.15.0, 0.14.0. This is not a
+cold cache. JitPack's build log shows a structural failure — its image has no
+JDK 17 and the library's own build requests one:
+
+```
+Cannot find a Java installation on your machine (Linux … amd64)
+matching: {languageVersion=17, vendor=any vendor}
+Toolchain download repositories have not been configured.
+```
+
+Building the same tag against a local JDK 17 succeeds (`:library:assembleRelease`,
+~2m30s, 57 MB AAR). So Milestone 4 uses a Gradle **composite build** — or a
+vendored source checkout — not a `implementation(...)` line. Anyone who writes the
+dependency line will get a 404 at configure time and may not notice why.
+
+**Decision #30 — the JS runtime on Android is the bundled QuickJS, not Deno.**
+Unpacking the AAR shows it ships `jni/arm64-v8a/libqjs.so` (~0.9 MB) alongside
+`libpython.zip.so` (~14.3 MB) and `res/raw/ytdlp` (~3.2 MB). QuickJS is what
+solves the player challenge, so the ~92 MB Deno bundle added to the desktop app
+(§1.1's sibling problem) is **not** carried into the APK. The two platforms solve
+the same problem at very different cost; do not copy the desktop answer across.
+
+**Decision #31 — the `/api/` contract is pinned before any Kotlin is written.**
+The frontend is one file shared by both servers, so the Kotlin implementation must
+answer with byte-identical JSON. Nothing tied the two together, and drift produces
+no error anywhere — the WebView simply renders nothing on a phone while desktop
+keeps working. The concrete failure is naming: Pydantic emits snake_case
+(`job_id`, `download_url`), Kotlin defaults to camelCase, and a `val jobId`
+yields `.job_id === undefined` with no stack trace.
+
+`openapi-contract.json` snapshots the document FastAPI already serves at
+`/openapi.json`, and `tests/test_api_contract.py` asserts the live spec still
+matches. Verified stable across modes, version stamps and download
+configuration, so it describes the code rather than the deployment. The Kotlin
+side must consume the same file rather than restating the schema.
+
+**Decision #32 — the project is GPL-3.0-or-later, not MIT.** There was no
+`LICENSE` file at all; the README's "MIT" conveyed no grant, because MIT requires
+the copyright and permission notice in all copies. Meanwhile the bundled FFmpeg is
+a GPL build, so shipping it alongside MIT-licensed code left the combined
+distribution's licensing in doubt. Rather than resolve that ambiguity, the project
+took the more restrictive license. Every runtime dependency is GPL-3.0-compatible;
+`mutagen` is the one to watch, being GPL-2.0-**or-later**, whose "or later" clause
+is what permits distribution at version 3. Copies already distributed under MIT
+remain MIT — MIT grants are irreversible and are not withdrawn.
+
+This also settles the Android obligation above: `youtubedl-android` is GPL-3.0 and
+is now simply compatible with the project's own licence. Being correctly licensed
+in the repository is necessary but not sufficient, though — GPL-3.0 §4 requires the
+licence to accompany the *distributed work*, so `LICENSE` and `NOTICE` are bundled
+into the PyInstaller output and CI fails the build if either is missing from the
+artifact. The same check applies to the APK.
+
+**Toolchain placement.** The JDK, Gradle, Android SDK, Gradle cache and AVD home
+all live under `.toolchain/` (gitignored), installed by `dev/setup-android.sh`.
+Nothing is written to `/usr/lib/jvm`, `/usr/bin`, `~/.gradle` or `~/.android`.
+This is deliberate: M4 is the first milestone that cannot be verified without a
+compiler, and the desktop milestone shipped with CI green before five defects
+surfaced that only a real run could find.
+
 ---
 
 ## 2. Ecosystem Architecture
@@ -443,15 +512,16 @@ flowchart TD
   * The base config must keep cleartext **disabled** for all other domains — do not set a blanket `usesCleartextTraffic="true"`.
   * Note: from Android 17 (API 37) an implicit localhost config exists, but we still ship the explicit config for the 8.0–16 range.
 * **Core Engine**:
-  * Integrates `youtubedl-android` (`io.github.junkfood02.youtubedl-android`, latest stable 0.18.x).
+  * Integrates `youtubedl-android` (`com.github.yausername:youtubedl-android`), **built from source as a Gradle composite build — not resolved from JitPack, which cannot build it** (§1.8 Decision #29).
   * Initialize both `YoutubeDL.getInstance().init(this)` **and** `FFmpeg.getInstance().init(this)` — without FFmpeg, remux/mp3/subtitle postprocessing silently fails.
   * Pre-compiled FFmpeg shared libraries (`.so`) for `arm64-v8a` ABI only.
+  * The AAR is **not** a Kotlin rewrite: it embeds Python (`libpython.zip.so`, ~14.3 MB per ABI) and a prebuilt `yt-dlp` binary (`res/raw/ytdlp`, ~3.2 MB), driven from Kotlin. It also bundles **QuickJS** (`libqjs.so`, ~0.9 MB) as the player-challenge runtime, so Deno is not required here (§1.8 Decision #30).
   * **Size budget: 90–120 MB APK, ~250–350 MB installed** (§1.1, Decision #7). This is the honest figure and must be stated in release notes and any store listing. Supersedes the original ~42 MB / ~85 MB estimates throughout this document.
 * **Storage & Services**:
   * Foreground Service with persistent notification to prevent Android OS process kills during active downloads.
   * Completed media moved to `/Download` folder via Android `MediaStore.Downloads` (API 29+) with legacy storage fallback for API 26–28.
   * Silent background `yt-dlp` updates via `YoutubeDL.getInstance().updateYoutubeDL()`.
-  * **License obligation:** `youtubedl-android` is GPL-3.0. The distributed APK must comply with GPL-3.0 (source availability + license notice). Confirm before publishing any binary.
+  * **License obligation:** `youtubedl-android` is GPL-3.0. **Satisfied** — MediaGrab is GPL-3.0-or-later, `LICENSE` and `NOTICE` ship in every release, and the APK's corresponding source is the public repository (§1.8, Decision #32).
 
 #### GitHub Actions CI (`.github/workflows/build-android.yml`):
 * Sets up JDK 17 (Temurin) and the Android SDK via `android-actions/setup-android@v4`.
@@ -500,18 +570,42 @@ flowchart LR
 3. Create `.github/workflows/build-desktop.yml` for Windows `.exe` and Linux release builds. **Done**, with the release gated on verification (§1.7 Decision #27) and version stamped from the tag.
 4. Verify execution on Linux **and on Windows**. **Done** — see the superseded verification-scope note in §1.3.
 
-### Milestone 4: Standalone Android App (`android/`) — ⏭ next
-1. Initialize `android/` project structure with Gradle wrapper and AndroidManifest, `arm64-v8a` only.
-2. Integrate `youtubedl-android` + FFmpeg, and bundle the web assets into APK assets.
-3. Implement embedded Ktor micro-server (**CIO engine**) bridging `/api/` calls to `YoutubeDL` **and** serving the bundled web assets.
+### Milestone 4: Standalone Android App (`android/`) — 🚧 in progress
+
+Scaffold and toolchain landed 2026-10-13: `dev/setup-android.sh` installs JDK 17,
+Gradle 8.9 and the Android SDK under `.toolchain/`, and `android/` builds a signed
+2.0 MB debug APK. That scaffold contains one placeholder object and exists to prove
+the toolchain compiles. See §1.8 for what the first real build revealed.
+
+1. Initialize `android/` project structure with Gradle wrapper and AndroidManifest, `arm64-v8a` only. **Done** as a smoke scaffold.
+2. Integrate `youtubedl-android` + FFmpeg, and bundle the web assets into APK assets. **Rewritten** — must be a composite build, not a dependency (§1.8 Decision #29).
+3. Implement embedded Ktor micro-server (**CIO engine**) bridging `/api/` calls to `YoutubeDL` **and** serving the bundled web assets. Must answer with the shapes in `openapi-contract.json` (§1.8 Decision #31).
 4. Add loopback-scoped `network_security_config.xml` so the WebView can load cleartext `127.0.0.1` (§4 Component 4).
 5. Implement Foreground Service and `MediaStore.Downloads` saving.
-6. Verify the APK against the **90–120 MB** budget before release; publish with GPL-3.0 compliance (§1.1).
+6. Verify the APK against the **90–120 MB** budget before release; publish with GPL-3.0 compliance (§1.1, §1.8 Decision #32).
 7. Create `.github/workflows/build-android.yml` for automated arm64 APK compilation.
 
 ---
 
 ## 6. Verification & Testing
+
+**The suite runs in CI on every push and pull request.** `.github/workflows/tests.yml`
+runs the full set on ubuntu (desktop mode), ubuntu (hosted mode) and Windows. All
+three are load-bearing: hosted is not a superset of desktop — the guardrails, the
+per-IP ceiling and the retention sweeper exist only there — and Windows is where
+`run_desktop.py` exercises its genuinely platform-specific paths.
+
+This was added late and immediately paid for itself. `build-desktop.yml` is
+tag-triggered, so for most of the project's life *nothing* ran pytest in CI. The
+first Windows run of the new workflow failed with a `UnicodeDecodeError` from 54
+`read_text()` calls that omitted `encoding=` and therefore decoded with `cp1252`
+on Windows. The bug was latent and older than the workflow that found it.
+
+Two consequences worth carrying into any future test work:
+
+* Reading repository files in tests must specify `encoding="utf-8"` explicitly.
+* Assertions that read files must be checked against the *Windows* locale, not
+  just Linux. `LC_ALL=C PYTHONUTF8=0` reproduces it locally.
 
 1. **Automated Unit & Integration Tests**:
    * `uv run pytest tests/test_capabilities_and_modes.py -v`

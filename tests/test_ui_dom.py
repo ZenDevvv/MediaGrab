@@ -832,3 +832,45 @@ def test_e2e_servers_disable_os_open_and_isolate_downloads():
     fixture = text[text.index("def _server(mode"):text.index("def live_server")]
     assert '"MEDIA_GRAB_OS_OPEN": "false"' in fixture
     assert '"MEDIA_GRAB_DOWNLOADS_DIR"' in fixture
+
+
+def test_milestone_4_plan_matches_reality():
+    """The implementation plan is the document a newcomer trusts first.
+
+    It went stale in ways that actively cost time: it named a Maven coordinate
+    that never existed, for a library that cannot be resolved at all, and it
+    still described the licence question as unresolved after it had been
+    settled. A plan that is confidently wrong is worse than no plan, because it
+    is believed.
+    """
+    plan = (Path(__file__).resolve().parent.parent
+            / "MULTI_PLATFORM_IMPLEMENTATION_PLAN.md").read_text(encoding="utf-8")
+
+    # Scope the coordinate check to Component 4, the section someone
+    # implementing M4 actually reads. A blanket substring search is wrong:
+    # §1.8 quotes the bad coordinate precisely in order to record that it never
+    # existed, and that historical note is worth keeping. What must not happen
+    # is the architecture section still telling an implementer to use it.
+    start = plan.index("### Component 4: Standalone Android App")
+    end = plan.index("## 5. Implementation Milestones")
+    component4 = plan[start:end]
+
+    assert "io.github.junkfood02" not in component4, (
+        "Component 4 still names a youtubedl-android coordinate that never existed"
+    )
+    assert "com.github.yausername" in component4, (
+        "Component 4 must name the real coordinate"
+    )
+
+    # M4 is not "next" any more; the scaffold is built and the first real build
+    # overturned the plan's dependency assumption.
+    assert "⏭ next" not in plan
+    assert "composite build" in component4, (
+        "Component 4 must record that youtubedl-android is built from source"
+    )
+
+    # Resolved, so it must not still be described as an open question.
+    assert "GPL-3.0-or-later" in plan
+
+    # The contract is the thing that keeps the Kotlin port honest.
+    assert "openapi-contract.json" in plan
