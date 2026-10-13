@@ -1,0 +1,65 @@
+name: Android
+
+# The Kotlin half of the /api/ contract. Runs on every push and pull request
+# because the Android server is a second implementation of the same eleven
+# endpoints the Python app serves, and nothing else would catch drift between
+# them -- see MULTI_PLATFORM_IMPLEMENTATION_PLAN.md §1.8 Decision #31.
+on:
+  push:
+    branches:
+      - "**"
+    tags-ignore:
+      - "v*"
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract:
+    name: Android contract tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Install the Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Verify the OpenAPI contract snapshot is current
+        # Fails the build if the snapshot drifted, before spending minutes on a
+        # compile that would be checking against a stale contract.
+        run: python dev/sync-contract.py --check
+
+      - name: Run the Kotlin unit tests
+        # testDebugUnitTest, not connectedAndroidTest: the engine is behind an
+        # interface, so the whole HTTP surface is exercised on the JVM against
+        # real loopback. No emulator, no device, minutes instead of tens of
+        # minutes.
+        working-directory: android
+        run: ./gradlew testDebugUnitTest
+
+      - name: Assemble a debug APK
+        # Proves the app still links, not just that its tests pass.
+        working-directory: android
+        run: ./gradlew assembleDebug
+
+      - name: Upload the APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: MediaGrab-Android-debug
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 7

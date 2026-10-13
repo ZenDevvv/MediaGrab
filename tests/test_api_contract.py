@@ -221,3 +221,63 @@ def test_no_required_field_is_nullable_in_the_schema(contract):
                 f"{name}.{prop} is required but nullable -- a client cannot "
                 f"rely on it being present"
             )
+
+def test_android_server_is_validated_against_the_same_contract():
+    """Both implementations must be checked against one file.
+
+    The Kotlin server re-implements the same endpoints for the Android app
+    while the frontend stays shared. If only the Python side were asserted,
+    a Kotlin field renamed to camelCase would render a blank WebView on a
+    phone while every test stayed green — the reason the snapshot exists.
+    """
+    root = Path(__file__).resolve().parent.parent
+
+    gradle = (root / "android" / "app" / "build.gradle.kts").read_text(encoding="utf-8")
+    assert "openapi-contract.json" in gradle, (
+        "the Android build must be pointed at the same contract file"
+    )
+    # Read from the repository rather than a vendored copy, so the two sides
+    # cannot each drift behind a private snapshot.
+    assert "File(repoRoot" in gradle or "repoRoot" in gradle
+
+    workflow = (root / ".github" / "workflows" / "android.yml")
+    assert workflow.exists(), (
+        "the Kotlin contract tests must run in CI, not only locally"
+    )
+    body = workflow.read_text(encoding="utf-8")
+    assert "testDebugUnitTest" in body
+    assert "sync-contract.py --check" in body
+
+
+def test_android_kotlin_dtos_annotate_every_multiword_field():
+    """Every camelCase property must carry @SerialName.
+
+    Kotlin's default serialisation uses the property name verbatim, so a
+    multi-word property is emitted as camelCase and the frontend — which reads
+    snake_case — gets undefined. Single-word properties (`mode`, `title`) are
+    already lower-case and need no annotation.
+
+    The test keys on uppercase letters, not underscores: checking the Kotlin
+    name for an underscore tests the wrong thing, because an annotated property
+    has no underscore in its Kotlin name at all. That first version passed
+    with the annotation removed.
+    """
+    dto = (Path(__file__).resolve().parent.parent
+           / "android" / "app" / "src" / "main" / "kotlin" / "dev" / "mediagrab"
+           / "contract" / "Dto.kt").read_text(encoding="utf-8")
+
+    import re
+    unannotated = []
+    for match in re.finditer(r"val (\w+):", dto):
+        name = match.group(1)
+        if not any(c.isupper() for c in name):
+            continue  # single lower-case word; serialises correctly as-is
+        line_start = dto.rfind("\n", 0, match.start()) + 1
+        prefix = dto[line_start:match.start()]
+        if "@SerialName" not in prefix:
+            unannotated.append(name)
+
+    assert not unannotated, (
+        f"Kotlin properties that would serialise as camelCase: {unannotated}. "
+        f"Without @SerialName the frontend reads undefined with no error."
+    )
