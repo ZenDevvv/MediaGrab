@@ -24,6 +24,26 @@ compiler. The desktop milestone shipped with CI green and still had five
 defects that only a real run on real hardware found (ARCHITECTURE.md §13).
 Writing an APK blind would repeat that at larger scale.
 
+## `android-sandbox.sh`
+
+Runs an Android tool with everything it writes kept under `.toolchain/`:
+
+```bash
+dev/android-sandbox.sh adb devices
+dev/android-sandbox.sh emulator -avd mediagrab -no-window -gpu guest
+```
+
+`env.sh` covers the variables the SDK documents, but adb writes its key pair
+to `$HOME/.android` regardless, and the emulator writes to `$HOME`, `$TMPDIR`
+and `$XDG_RUNTIME_DIR`. This wrapper overrides those per command rather than
+for the whole shell. Use it for every `adb`, `emulator`, `avdmanager` and
+`sdkmanager` call.
+
+The `mediagrab` AVD is an x86_64 API 34 image. Debug APKs carry x86_64 natives
+for it; see `android/app/build.gradle.kts` for why ARM translation is not
+enough. Use `-gpu guest`: `swiftshader_indirect` segfaulted the emulator
+mid-session.
+
 ## `sync-contract.py`
 
 Maintains `openapi-contract.json`, a snapshot of the OpenAPI document FastAPI

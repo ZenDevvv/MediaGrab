@@ -105,6 +105,9 @@ install_sdk() {
 
   export ANDROID_HOME="$dest"
   export ANDROID_SDK_ROOT="$dest"
+  # sdkmanager writes analytics.settings to ~/.android unless told otherwise;
+  # env.sh sets this for later shells, but this run needs it too.
+  export ANDROID_USER_HOME="$TOOLCHAIN/android-home"
   local sdkmanager="$dest/cmdline-tools/latest/bin/sdkmanager"
 
   if [ "$FORCE" -eq 0 ] && [ -d "$dest/platforms/$ANDROID_PLATFORM" ] \
