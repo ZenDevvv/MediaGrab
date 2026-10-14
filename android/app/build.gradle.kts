@@ -117,8 +117,12 @@ android {
         applicationId = "dev.mediagrab"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.0.0-dev"
+        // Stamped by CI from the release tag (build-android.yml); local builds
+        // keep the dev values. versionCode must only ever increase -- Android
+        // refuses an update with a lower one -- so CI derives it from the
+        // semver: major*10000 + minor*100 + patch.
+        versionCode = (findProperty("mediagrab.versionCode") as String?)?.toInt() ?: 1
+        versionName = (findProperty("mediagrab.versionName") as String?) ?: "0.0.0-dev"
 
         // arm64-v8a only. The AAR carries ~14MB of Python per ABI and the
         // plan's budget assumes one (§1.1 Decision #7).

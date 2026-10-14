@@ -3,6 +3,8 @@
 
     python dev/check-apk.py android/app/build/outputs/apk/release/app-release.apk
 
+    python dev/check-apk.py --unsigned-ok app-release-unsigned.apk
+
 Fails (exit 1) unless every check passes:
 
 * size     -- at most 120 MB, the top of the plan's budget (§1.1 Decision #7)
@@ -51,7 +53,7 @@ def read_lock() -> dict[str, str]:
     return lock
 
 
-def main(apk_path: str) -> int:
+def main(apk_path: str, unsigned_ok: bool = False) -> int:
     apk = Path(apk_path)
     if not apk.is_file():
         print(f"FAIL: no such file: {apk}")
@@ -92,14 +94,21 @@ def main(apk_path: str) -> int:
               f"yt-dlp {lock.get('version')} matches android/ytdlp.lock",
               f"expected one yt-dlp matching android/ytdlp.lock, found {len(zipapps)}: {digests}")
 
-    verify = subprocess.run(
-        [build_tool("apksigner"), "verify", "--print-certs", str(apk)],
-        capture_output=True, text=True,
-    )
-    signed = verify.returncode == 0
-    reason = ((verify.stderr or verify.stdout).strip().splitlines() or ["no output"])[0]
-    check(signed, "signature verifies",
-          f"not signed, or the signature does not verify: {reason}")
+    if unsigned_ok:
+        # For manual CI runs without the signing secrets: everything else is
+        # still worth checking. Never used for a tag build.
+        print("skip  signing (--unsigned-ok)")
+        verify = None
+    else:
+        verify = subprocess.run(
+            [build_tool("apksigner"), "verify", "--print-certs", str(apk)],
+            capture_output=True, text=True,
+        )
+    signed = verify is not None and verify.returncode == 0
+    if verify is not None:
+        reason = ((verify.stderr or verify.stdout).strip().splitlines() or ["no output"])[0]
+        check(signed, "signature verifies",
+              f"not signed, or the signature does not verify: {reason}")
     if signed:
         subject = next((l for l in verify.stdout.splitlines() if "certificate DN" in l), "")
         check("Android Debug" not in subject,
@@ -119,6 +128,9 @@ def main(apk_path: str) -> int:
 
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
+    args = sys.argv[1:]
+    unsigned_ok = "--unsigned-ok" in args
+    paths = [a for a in args if a != "--unsigned-ok"]
+    if len(paths) != 1:
         sys.exit(__doc__)
-    sys.exit(main(sys.argv[1]))
+    sys.exit(main(paths[0], unsigned_ok))

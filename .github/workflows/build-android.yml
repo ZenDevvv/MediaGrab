@@ -1,0 +1,121 @@
+name: Build Android App
+
+# The release APK. Called by build-desktop.yml on v* tags, so that the GitHub
+# release is published once, with every platform or none -- two workflows
+# attaching to the same tag independently would race, and either could publish
+# a release missing the other's asset. Also runnable by hand.
+#
+# Signing secrets (see dev/README.md, "Release APK"):
+#   MEDIAGRAB_KEYSTORE_B64       base64 of the release keystore
+#   MEDIAGRAB_KEYSTORE_PASSWORD  its password (also used as the key password)
+# A tag build without them fails rather than publish an APK Android will not
+# install. A manual run without them builds unsigned and checks the rest.
+on:
+  workflow_call:
+    secrets:
+      MEDIAGRAB_KEYSTORE_B64:
+        required: false
+      MEDIAGRAB_KEYSTORE_PASSWORD:
+        required: false
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  apk:
+    name: Release APK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Install the Android SDK
+        # The same script developers run; see android.yml for why not
+        # android-actions/setup-android.
+        run: bash dev/setup-android.sh
+
+      - name: Load the toolchain
+        run: |
+          source .toolchain/env.sh
+          echo "JAVA_HOME=$JAVA_HOME" >> "$GITHUB_ENV"
+          echo "ANDROID_HOME=$ANDROID_HOME" >> "$GITHUB_ENV"
+          # Both, not just ANDROID_HOME: the runner predefines ANDROID_SDK_ROOT
+          # and Gradle refuses to build when the two disagree (android.yml).
+          echo "ANDROID_SDK_ROOT=$ANDROID_HOME" >> "$GITHUB_ENV"
+          echo "GRADLE_USER_HOME=$GRADLE_USER_HOME" >> "$GITHUB_ENV"
+          echo "$JAVA_HOME/bin" >> "$GITHUB_PATH"
+
+      - name: Stamp version
+        shell: bash
+        run: |
+          # v1.2.3 -> versionName 1.2.3, versionCode 10203. versionCode must
+          # only ever increase or Android refuses the update, hence derived
+          # from the numbers rather than, say, the run number.
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            NAME="${GITHUB_REF_NAME#v}"
+            if [[ ! "$NAME" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+) ]]; then
+              echo "::error::tag $GITHUB_REF_NAME is not v<major>.<minor>.<patch>; cannot derive a versionCode"
+              exit 1
+            fi
+            CODE=$(( BASH_REMATCH[1] * 10000 + BASH_REMATCH[2] * 100 + BASH_REMATCH[3] ))
+          else
+            NAME="0.0.0-dev"
+            CODE=1
+          fi
+          echo "VERSION_NAME=$NAME" >> "$GITHUB_ENV"
+          echo "VERSION_CODE=$CODE" >> "$GITHUB_ENV"
+          echo "[build] versionName $NAME, versionCode $CODE"
+
+      - name: Restore the signing key
+        shell: bash
+        env:
+          KEYSTORE_B64: ${{ secrets.MEDIAGRAB_KEYSTORE_B64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.MEDIAGRAB_KEYSTORE_PASSWORD }}
+        run: |
+          if [[ -z "$KEYSTORE_B64" || -z "$KEYSTORE_PASSWORD" ]]; then
+            if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+              echo "::error::release signing secrets are not set; refusing to build an APK that cannot be installed or updated"
+              exit 1
+            fi
+            echo "::warning::no signing secrets; building unsigned for inspection only"
+            echo "UNSIGNED_OK=--unsigned-ok" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          # RUNNER_TEMP is wiped after the job; the key never enters the
+          # workspace, the artifact or the cache.
+          echo "$KEYSTORE_B64" | base64 --decode > "$RUNNER_TEMP/release.jks"
+          echo "MEDIAGRAB_KEYSTORE=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+          echo "::add-mask::$KEYSTORE_PASSWORD"
+          echo "MEDIAGRAB_KEYSTORE_PASSWORD=$KEYSTORE_PASSWORD" >> "$GITHUB_ENV"
+
+      - name: Build
+        working-directory: android
+        run: |
+          ./gradlew assembleRelease \
+            -Pmediagrab.versionName="$VERSION_NAME" \
+            -Pmediagrab.versionCode="$VERSION_CODE"
+
+      - name: Verify the APK
+        # Size, ABIs, the bundled LICENSE/NOTICE (GPL-3.0 s4), the pinned
+        # yt-dlp, a release signature, and debuggable off.
+        run: |
+          APK=$(ls android/app/build/outputs/apk/release/*.apk)
+          python dev/check-apk.py $UNSIGNED_OK "$APK"
+          mkdir -p dist
+          cp "$APK" dist/MediaGrab-Android-arm64.apk
+          (cd dist && sha256sum MediaGrab-Android-arm64.apk > MediaGrab-Android-arm64.apk.sha256)
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: MediaGrab-Android
+          path: dist/*
+          retention-days: 30

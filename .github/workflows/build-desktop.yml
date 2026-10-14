@@ -427,6 +427,13 @@ jobs:
             MediaGrab-Linux-x86_64.tar.gz.sha256
           retention-days: 14
 
+  # The Android APK, built and verified by its own reusable workflow so it can
+  # also be run by hand. Called from here rather than triggered by the tag
+  # itself so `publish` below can wait on it.
+  android:
+    uses: ./.github/workflows/build-android.yml
+    secrets: inherit
+
   # Publishing is gated on every build and every verification passing.
   #
   # v0.1.0 published a release containing only the Linux tarball: each job
@@ -437,7 +444,7 @@ jobs:
   publish:
     name: Publish release
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [windows, linux]
+    needs: [windows, linux, android]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v4
@@ -449,7 +456,8 @@ jobs:
         run: |
           missing=0
           for f in MediaGrab-Windows.zip MediaGrab-Windows.zip.sha256 \
-                   MediaGrab-Linux-x86_64.tar.gz MediaGrab-Linux-x86_64.tar.gz.sha256; do
+                   MediaGrab-Linux-x86_64.tar.gz MediaGrab-Linux-x86_64.tar.gz.sha256 \
+                   MediaGrab-Android-arm64.apk MediaGrab-Android-arm64.apk.sha256; do
             if [ ! -f "dist/$f" ]; then echo "MISSING: $f"; missing=1; fi
           done
           ls -la dist
