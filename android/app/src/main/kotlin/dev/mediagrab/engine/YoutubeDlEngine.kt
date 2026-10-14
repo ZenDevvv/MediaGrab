@@ -1,6 +1,7 @@
 package dev.mediagrab.engine
 
 import android.content.Context
+import android.util.Log
 import com.yausername.ffmpeg.FFmpeg
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLRequest
@@ -44,6 +45,8 @@ class YoutubeDlEngine(
     /** Private staging. Finished files leave it for public Downloads. */
     private val downloadDir: File,
     private val publisher: DownloadsPublisher,
+    /** The yt-dlp version this APK bundles (android/ytdlp.lock). */
+    private val bundledYtdlpVersion: String,
 ) : Engine {
 
     /**
@@ -71,7 +74,9 @@ class YoutubeDlEngine(
      * main thread.
      */
     suspend fun initialise() = withContext(Dispatchers.IO) {
+        refreshBundledYtdlp()
         YoutubeDL.getInstance().init(appContext)
+        ytdlpStamp().writeText(bundledYtdlpVersion)
         FFmpeg.getInstance().init(appContext)
         // No job outlives its process, so anything already in staging is left
         // over from one that was killed mid-download. Nothing else would ever
@@ -79,6 +84,23 @@ class YoutubeDlEngine(
         downloadDir.deleteRecursively()
         downloadDir.mkdirs()
     }
+
+    /**
+     * The library copies yt-dlp out of the APK only when no copy exists yet,
+     * so an app update carrying a newer yt-dlp would be ignored on every
+     * existing install -- the stale copy is exactly what 403s on YouTube. The
+     * stamp records which bundled version the on-device copy came from; on a
+     * mismatch the copy is removed and init() installs this APK's.
+     */
+    private fun refreshBundledYtdlp() {
+        val stamp = ytdlpStamp()
+        val installed = stamp.takeIf { it.isFile }?.readText()
+        if (installed != bundledYtdlpVersion) {
+            File(appContext.noBackupFilesDir, "youtubedl-android/yt-dlp").deleteRecursively()
+        }
+    }
+
+    private fun ytdlpStamp() = File(appContext.noBackupFilesDir, "ytdlp-bundled-version")
 
     override suspend fun inspect(url: String): InfoResponse = withContext(Dispatchers.IO) {
         // -J dumps a single JSON document and skips the download, which is the
@@ -189,6 +211,9 @@ class YoutubeDlEngine(
 
         if (job.status == "cancelled") return
         if (response.exitCode != 0) {
+            // The full stderr, for `adb logcat -s MediaGrab`: the job's error
+            // is all the user sees, and it is rarely enough to diagnose with.
+            Log.w(TAG, "yt-dlp exited ${response.exitCode} for job ${job.id}:\n${response.err}")
             job.status = "error"
             job.error = response.err.trim().ifEmpty { "download failed" }
             return
@@ -334,6 +359,7 @@ class YoutubeDlEngine(
 }
 
 private val TERMINAL = setOf("ready", "error", "cancelled")
+private const val TAG = "MediaGrab"
 
 /** Resolutions offered in the chooser. */
 private val STANDARD = listOf(240, 360, 480, 720, 1080, 1440, 2160)

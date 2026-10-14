@@ -34,7 +34,9 @@ class MediaGrabApp : Application() {
     /** The download engine. Shared with [DownloadService], which watches it. */
     val engine: YoutubeDlEngine by lazy {
         // Private staging; finished files are published to Downloads.
-        YoutubeDlEngine(this, File(filesDir, "downloads"), DownloadsPublisher(this)).also {
+        YoutubeDlEngine(
+            this, File(filesDir, "downloads"), DownloadsPublisher(this), BuildConfig.YTDLP_VERSION,
+        ).also {
             it.onActivityChanged = {
                 // Only ever *starts* the service: it stops itself once the
                 // engine reports nothing active, so no stop races a new job.

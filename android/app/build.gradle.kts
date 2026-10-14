@@ -1,3 +1,7 @@
+import java.net.URI
+import java.security.MessageDigest
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -33,6 +37,55 @@ val syncWebAssets by tasks.registering(Sync::class) {
     into(webAssetsRoot.map { it.dir("web") })
 }
 
+/**
+ * yt-dlp, pinned by android/ytdlp.lock and fetched at build time.
+ *
+ * Generated as res/raw/ytdlp, the resource name the library installs from;
+ * an application resource overrides a library's of the same name, so this
+ * replaces the AAR's own -- which is whatever yt-dlp the library's release
+ * happened to bundle (2025.11.12 at 0.18.1, by then 403ing on YouTube).
+ *
+ * The download is cached under .toolchain/ with the rest of the toolchain and
+ * verified against the pinned SHA-256 on every build, so a tampered or
+ * truncated file fails the build instead of shipping.
+ */
+val ytdlpLock = Properties().apply {
+    rootProject.file("ytdlp.lock").inputStream().use { load(it) }
+}
+val ytdlpVersion: String = ytdlpLock.getProperty("version")
+val ytdlpSha256: String = ytdlpLock.getProperty("sha256")
+val ytdlpResRoot = layout.buildDirectory.dir("generated/ytdlp-res")
+val fetchYtdlp by tasks.registering {
+    val cache = File(repoRoot, ".toolchain/downloads/yt-dlp-$ytdlpVersion")
+    val target = ytdlpResRoot.map { it.file("raw/ytdlp") }
+    inputs.property("version", ytdlpVersion)
+    inputs.property("sha256", ytdlpSha256)
+    outputs.file(target)
+    doLast {
+        fun sha256(f: File) = MessageDigest.getInstance("SHA-256")
+            .digest(f.readBytes()).joinToString("") { "%02x".format(it) }
+        if (!cache.isFile || sha256(cache) != ytdlpSha256) {
+            cache.parentFile.mkdirs()
+            val url = "https://github.com/yt-dlp/yt-dlp/releases/download/$ytdlpVersion/yt-dlp"
+            logger.lifecycle("MediaGrab: fetching yt-dlp $ytdlpVersion")
+            val partial = File(cache.path + ".part")
+            URI(url).toURL().openStream().use { input ->
+                partial.outputStream().use { input.copyTo(it) }
+            }
+            val actual = sha256(partial)
+            if (actual != ytdlpSha256) {
+                partial.delete()
+                throw GradleException(
+                    "yt-dlp $ytdlpVersion checksum mismatch: expected $ytdlpSha256, got $actual. " +
+                        "Refusing to bundle it; see android/ytdlp.lock."
+                )
+            }
+            partial.renameTo(cache)
+        }
+        cache.copyTo(target.get().asFile, overwrite = true)
+    }
+}
+
 android {
     namespace = "dev.mediagrab"
     compileSdk = 35
@@ -47,7 +100,12 @@ android {
         // arm64-v8a only. The AAR carries ~14MB of Python per ABI and the
         // plan's budget assumes one (§1.1 Decision #7).
         ndk { abiFilters += listOf("arm64-v8a") }
+
+        // Lets the app tell when the on-device copy predates this build's.
+        buildConfigField("String", "YTDLP_VERSION", "\"$ytdlpVersion\"")
     }
+
+    buildFeatures { buildConfig = true }
 
     buildTypes {
         getByName("debug") {
@@ -80,6 +138,7 @@ android {
     sourceSets {
         getByName("main").java.srcDirs("src/main/kotlin")
         getByName("main").assets.srcDir(webAssetsRoot.get().asFile)
+        getByName("main").res.srcDir(ytdlpResRoot.get().asFile)
         getByName("test").java.srcDirs("src/test/kotlin")
     }
 
@@ -134,4 +193,4 @@ tasks.withType<Test>().configureEach {
         showStandardStreams = false
     }
 }
-tasks.named("preBuild") { dependsOn(syncWebAssets) }
+tasks.named("preBuild") { dependsOn(syncWebAssets, fetchYtdlp) }

@@ -1,0 +1,10 @@
+# The yt-dlp bundled into the APK, pinned exactly.
+#
+# Overrides the copy inside the youtubedl-android AAR, which was 2025.11.12
+# and got HTTP 403 on YouTube streams that 2026.08.19 fetched from the same
+# network. YouTube breaks older yt-dlp releases routinely, so this is expected
+# to move; bump both lines together, from the release's SHA2-256SUMS:
+#   https://github.com/yt-dlp/yt-dlp/releases/download/<version>/SHA2-256SUMS
+# (the line for the platform-independent "yt-dlp" zipapp).
+version=2026.08.19
+sha256=1fa6733c37ea6fb51c99ad8fe785e7b7e5f3246c9b980230329d4fb72ed8d4d6
