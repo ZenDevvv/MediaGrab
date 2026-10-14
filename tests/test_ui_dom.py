@@ -389,11 +389,30 @@ def _workflow():
     return yaml.safe_load(_workflow_text())
 
 
-def test_publish_job_waits_for_both_builds():
+def test_publish_job_waits_for_every_build():
     """v0.1.0 published a Linux-only release while the Windows job failed."""
     jobs = _workflow()["jobs"]
     assert "publish" in jobs, "a single gated job must create the release"
-    assert set(jobs["publish"].get("needs", [])) == {"windows", "linux"}
+    assert set(jobs["publish"].get("needs", [])) == {"windows", "linux", "android"}
+
+
+def test_android_build_is_called_not_published_separately():
+    """The APK joins the one gated release instead of racing it.
+
+    build-android.yml is a reusable workflow called from here. Had it been
+    triggered by the tag itself, it would attach to the release on its own and
+    either workflow could publish without the other.
+    """
+    import yaml
+
+    jobs = _workflow()["jobs"]
+    assert jobs["android"]["uses"] == "./.github/workflows/build-android.yml"
+    with open(".github/workflows/build-android.yml", "r", encoding="utf-8") as f:
+        android = yaml.safe_load(f)
+    # PyYAML reads the bare key `on` as True.
+    triggers = android.get("on", android.get(True))
+    assert "push" not in triggers, "a tag push must not run it independently"
+    assert "action-gh-release" not in yaml.dump(android)
 
 
 def test_only_the_gated_job_creates_the_release():
