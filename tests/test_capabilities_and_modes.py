@@ -1137,7 +1137,7 @@ def test_default_cooldown_is_thirty_minutes():
 # --- Per-platform download availability ------------------------------------
 
 def test_unpublished_platforms_never_get_a_release_url(monkeypatch):
-    """CI builds Windows and Linux but has no Android job.
+    """Android is not in any published release yet.
 
     An all-or-nothing switch would advertise an APK that does not exist --
     the dead link §1.4 Decision #16 exists to prevent.
@@ -1149,7 +1149,7 @@ def test_unpublished_platforms_never_get_a_release_url(monkeypatch):
 
     assert urls["windows_url"].endswith("/MediaGrab-Windows.zip")
     assert urls["linux_url"].endswith("/MediaGrab-Linux-x86_64.tar.gz")
-    # No APK is built, so Android must not advertise one.
+    # No release carries an APK yet, so Android must not advertise one.
     assert urls["android_url"] == downloads.coming_soon_url()
     assert ".apk" not in urls["android_url"]
 
@@ -1174,8 +1174,24 @@ def test_no_release_urls_before_binaries_are_published(monkeypatch):
         assert "github.com" not in url
 
 
+def test_advertised_assets_are_the_ones_the_release_publishes():
+    """Every advertised filename must be one the release job requires.
+
+    The two are written in different languages in different files, and drift
+    between them produces no error until a user clicks a dead download link:
+    the Android name here once differed from the one CI publishes.
+    """
+    from app.services.downloads import _ASSET_FILES
+
+    with open(".github/workflows/build-desktop.yml", "r", encoding="utf-8") as f:
+        workflow = f.read()
+    publish = workflow[workflow.index("Verify every expected asset is present"):]
+    for key, filename in _ASSET_FILES.items():
+        assert filename in publish, f"{key}: {filename} is not an asset the release requires"
+
+
 def test_android_is_unpublished_by_default():
-    """Guards against an APK appearing in CI without the flag being updated."""
+    """No published release carries the APK yet; advertising it would 404."""
     from app.services.downloads import PUBLISHED_PLATFORMS
 
     assert "android" not in PUBLISHED_PLATFORMS
