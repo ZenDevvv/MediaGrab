@@ -21,7 +21,8 @@ plugins {
 val repoRoot = rootProject.layout.projectDirectory.dir("..").asFile
 
 /**
- * The frontend, copied into the APK under `assets/web/`.
+ * The frontend, copied into the APK under `assets/web/`, and the licence texts
+ * under `assets/licenses/`.
  *
  * Copied rather than pointing an asset srcDir at static/ directly: a bare
  * srcDir lands the files at the top of the asset tree, where they mix with
@@ -31,11 +32,33 @@ val repoRoot = rootProject.layout.projectDirectory.dir("..").asFile
  */
 val webAssetsRoot = layout.buildDirectory.dir("generated/webassets")
 val syncWebAssets by tasks.registering(Sync::class) {
+    into(webAssetsRoot)
     from(File(repoRoot, "static")) {
         exclude("**/README.md")
+        into("web")
     }
-    into(webAssetsRoot.map { it.dir("web") })
+    // GPL-3.0 §4: the licence must accompany the distributed work, and the APK
+    // is the work as distributed (plan §1.8 Decision #32). Outside web/, so
+    // the server does not expose them; dev/check-apk.py fails without them.
+    from(files(File(repoRoot, "LICENSE"), File(repoRoot, "NOTICE"))) {
+        into("licenses")
+    }
 }
+
+/**
+ * Release signing, from the environment and never from the repository.
+ *
+ * The key is the app's identity: Android installs an update only if it is
+ * signed with the same key as the installed copy, so anyone holding it can
+ * ship updates that phones accept as genuine, and losing it means no
+ * existing install can ever be updated again. Hence: a keystore kept outside
+ * the repository, located and unlocked by these variables -- locally from
+ * the shell, in CI from repository secrets.
+ *
+ * Without them the release build still runs and produces an unsigned APK,
+ * which Android will not install; dev/check-apk.py refuses it.
+ */
+val releaseKeystore: String? = System.getenv("MEDIAGRAB_KEYSTORE")
 
 /**
  * yt-dlp, pinned by android/ytdlp.lock and fetched at build time.
@@ -107,7 +130,27 @@ android {
 
     buildFeatures { buildConfig = true }
 
+    signingConfigs {
+        if (releaseKeystore != null) {
+            create("release") {
+                storeFile = file(releaseKeystore)
+                storePassword = System.getenv("MEDIAGRAB_KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("MEDIAGRAB_KEY_ALIAS") ?: "mediagrab"
+                keyPassword = System.getenv("MEDIAGRAB_KEY_PASSWORD")
+                    ?: System.getenv("MEDIAGRAB_KEYSTORE_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
+        getByName("release") {
+            signingConfig = signingConfigs.findByName("release")
+            // No R8: Ktor and kotlinx.serialization lean on reflection, and
+            // shrinking them needs keep rules this project has not written or
+            // tested. The size is in the native libraries, which R8 cannot
+            // touch, so the saving would be small for real risk.
+            isMinifyEnabled = false
+        }
         getByName("debug") {
             // Debug also carries x86_64 so it runs natively on the emulator.
             // The x86_64 system images can translate arm64 apps, but not this

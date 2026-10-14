@@ -49,6 +49,25 @@ notification, or a DevTools `Page.captureScreenshot` mid-animation -- each time
 leaving a ~1 GB core with systemd-coredump. For screenshots, prefer
 `adb exec-out screencap -p` at a resting screen.
 
+## Release APK: signing and `check-apk.py`
+
+Release builds are signed from the environment; the keystore never lives in
+the repository:
+
+```bash
+export MEDIAGRAB_KEYSTORE=/path/outside/repo/mediagrab-release.jks
+export MEDIAGRAB_KEYSTORE_PASSWORD=...      # MEDIAGRAB_KEY_PASSWORD defaults to this
+export MEDIAGRAB_KEY_ALIAS=mediagrab        # the default
+(cd android && ./gradlew assembleRelease)
+python dev/check-apk.py android/app/build/outputs/apk/release/app-release.apk
+```
+
+Without the variables the build still succeeds but produces
+`app-release-unsigned.apk`, which Android will not install and the check
+refuses. The check also gates size (<= 120 MB), ABIs (arm64-v8a only),
+the bundled `LICENSE`/`NOTICE`, the pinned yt-dlp, a non-debug signature and
+debuggable being off.
+
 ## `sync-contract.py`
 
 Maintains `openapi-contract.json`, a snapshot of the OpenAPI document FastAPI
