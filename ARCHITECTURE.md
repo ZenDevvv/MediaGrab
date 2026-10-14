@@ -19,6 +19,7 @@ One FastAPI codebase, one `/api/` contract, deployed three ways:
 |---|---|---|---|
 | **hosted** | Freestyle Linux VM (2 vCPU / 4 GB / 16 GB) | 1080p, 60 min, 1 GB, 3 concurrent | Zero retention (60 s post-retrieval) |
 | **desktop** | Windows / Linux native app | Unlimited | Written to the user's Downloads folder, never deleted |
+| **android** | Android app (arm64), §15 | Unlimited; reports itself as `desktop` | Published to the phone's Downloads, never deleted |
 | **web** | Browser (PWA) | Same as whichever server answers | — |
 
 The frontend is identical in all three. It learns which mode it is in from a
@@ -71,6 +72,8 @@ MediaGrab/
 │       ├── js_runtime.py        Which configured JS runtimes are installed
 │       └── logpaths.py          Launcher log + browser profile locations
 ├── static/                      index.html, choose.html, downloads.html, app.js
+├── android/                     Kotlin re-implementation of /api/ (§15)
+├── dev/                         Android toolchain, emulator sandbox, check-apk.py
 ├── run_desktop.py               Launcher; window fallback chain; log binding
 ├── packaging/
 │   ├── MediaGrab.spec           PyInstaller onedir build
@@ -85,7 +88,9 @@ MediaGrab/
 ├── tests/                       253 tests incl. headless-Chromium E2E
 └── .github/workflows/
     ├── tests.yml                pytest on push/PR: desktop, hosted, Windows
-    └── build-desktop.yml        Frozen builds on tags
+    ├── android.yml              Kotlin tests + contract check on push/PR
+    ├── build-android.yml        Signed release APK, called by build-desktop.yml
+    └── build-desktop.yml        Frozen builds + publish on tags
 ```
 
 ---
@@ -533,8 +538,9 @@ reading the code, which is why they are written down.
   `.desktop` entry, or Start Menu shortcut.
 - **No auto-update.** The settings panel detects a newer release and links to it;
   nothing replaces the running build.
-- **Android is not built.** The download button says so rather than pointing at an
-  asset that does not exist (`DOWNLOADS_PUBLISHED` gates this per platform).
+- **Android is built but unreleased, and unproven on hardware.** CI produces the
+  APK; the hosted download button still says "coming soon" until a release
+  carries it (`DOWNLOADS_PUBLISHED`). Verified on an emulator only (§15.6).
 - **Hosted YouTube downloads are mostly refused.** §4.1, §4.2. The native apps
   are unaffected because they download from the user's own connection.
 - **`pywebview` needs a matching PyGObject/.NET stack.** Often mismatched in a
@@ -547,3 +553,84 @@ reading the code, which is why they are written down.
   paused — the 5-minute idle timeout only pauses it, and any request restarts
   the auto-delete clock. The cap is plan-derived and not adjustable from the
   CLI. See `docs/OPERATIONS.md` §2.
+
+---
+
+## 15. Android app
+
+The Android app is a second server, not a port of the first: the Python
+backend cannot run on a phone, so `android/` re-implements the `/api/`
+contract in Kotlin and serves the **unchanged** `static/` frontend to a
+WebView. Everything the frontend sees must therefore match FastAPI exactly.
+
+### 15.1 Shape
+
+```text
+MainActivity ── WebView ──http──▶ 127.0.0.1:47813  Ktor (CIO), ApiServer
+                                                     │
+                                         Engine ◀────┘   interface; FakeEngine in tests
+                                           │
+                               YoutubeDlEngine ── youtubedl-android
+                                           │        (Python + yt-dlp + FFmpeg + QuickJS)
+                                           ▼
+                               DownloadsPublisher ── MediaStore.Downloads
+```
+
+`MediaGrabApp` owns the engine and server for the life of the process, so an
+activity relaunch cannot start a second server. The server has no Android
+dependencies — the engine, the published file (`StoredFile`) and "open
+Downloads" all arrive through interfaces or hooks — which is what lets the
+whole HTTP surface run as JVM tests over real loopback.
+
+### 15.2 The contract is pinned
+
+`openapi-contract.json` snapshots FastAPI's schema; `ApiContractTest` holds
+the Kotlin DTOs to it. The failure it prevents is silent: a camelCase field
+(`jobId`) reads as `undefined` in app.js and the phone renders nothing.
+SSE frames are **not** in the OpenAPI document, which is how Android once
+sent Kotlin `toString()` output as event data; `sseFrame()` now mirrors
+`api_events` field for field, with its own tests.
+
+### 15.3 Files and the background
+
+Each job downloads into its own private staging directory, then is published
+to public Downloads (MediaStore on 29+, the public directory on 26–28) and the
+staging is deleted. The name is read back after insert because the provider
+de-duplicates. `/api/file` streams the published file and never deletes it.
+`DownloadService` (type `dataSync`) holds a foreground notification while any
+job is active so a backgrounded download survives; it stops itself at zero.
+Android 12+ refuses to start it from the background — that refusal is
+logged, never allowed to fail the download. Once idle and backgrounded, the
+process is frozen by the system's app freezer and its server stops answering
+until the app returns to the foreground; that is expected.
+
+### 15.4 yt-dlp is the app's, not the library's
+
+`android/ytdlp.lock` pins version and SHA-256. The build fetches the zipapp,
+verifies it, and ships it as `res/raw/ytdlp`, overriding the AAR's copy. The
+library only installs yt-dlp when none exists, so the engine stamps the
+installed version and replaces a stale copy on upgrade. QuickJS, bundled in
+the AAR, solves YouTube's player challenge; there is no Deno on Android.
+
+### 15.5 Loopback is not private
+
+Any app on the phone can connect to 127.0.0.1. Every `/api/` request must
+carry a per-launch 256-bit token, set by `MainActivity` as an HttpOnly cookie
+in its own WebView and compared in constant time. Same-origin `fetch` and
+`EventSource` send it without app.js knowing. The static frontend is public.
+The port is fixed (47813) because it is part of the page origin — a new
+origin each launch would empty localStorage — and falls back to an ephemeral
+port only when the cause chain holds a `BindException`.
+
+### 15.6 Verification, and what it found
+
+JVM tests cover the HTTP surface, metadata mapping, progress parsing, link
+extraction, the token gate and port fallback. The app itself has been driven
+end to end on an x86_64 API 34 emulator over the WebView's DevTools
+(`dev/README.md`). Debug builds carry x86_64 for that; release is arm64 only.
+Those runs found defects no JVM test could: native libraries left compressed
+so Python could not start, non-JSON SSE frames, every YouTube file named
+`watch.mp4`, an MP3 bitrate divided to `0`, progress pinned at 100%, a stale
+on-device yt-dlp, and a refused service start surfacing as a 500 while the
+job ran on. **Not yet run on a physical phone**, and the release APK — arm64
+only — has not run anywhere.

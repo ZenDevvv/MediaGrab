@@ -2,13 +2,13 @@
 
 A lightweight, self-hosted media utility designed to inspect, clip, convert, and download media from over 1,750+ online video and audio platforms (including YouTube, Vimeo, TikTok, SoundCloud, Reddit, X/Twitter) into MP4 videos, MP3 audio tracks, or SRT subtitles.
 
-Runs three ways from one codebase: a **hosted web instance** with guardrails and zero retention, a **local desktop application**, and the **PWA** in a browser.
+Runs four ways from one frontend: a **hosted web instance** with guardrails and zero retention, a **local desktop application**, an **Android app**, and the **PWA** in a browser.
 
 ---
 
 ## Features
 
-- **Three deployment modes:** hosted cloud instance, native desktop app (Windows/Linux), or browser PWA — all sharing one `/api/` contract.
+- **Four deployment modes:** hosted cloud instance, native desktop app (Windows/Linux), Android app, or browser PWA — all sharing one `/api/` contract.
 - **Dual-Mode Guardrails:** In `hosted` mode the server caps resolution (1080p), duration (60 min, clip-aware), and file size (1 GB), enforced against *server-side* metadata so the caps cannot be spoofed.
 - **Remux-First Video (MP4):** Direct stream copying (`-c copy`) for AVC1/H.264 and AAC streams, eliminating CPU-intensive transcoding and saving battery.
 - **Precision Time Trimmer:** Uses `yt-dlp` keyframe stream slicing (`download_ranges`) to fetch only the requested clip instead of downloading multi-gigabyte source streams.
@@ -81,13 +81,51 @@ The launcher degrades rather than failing: `pywebview` (native, uses the WebView
 
 - **No installer yet.** You download, extract, and run. There is no `Setup.exe`, AppImage, or Start Menu entry. That is acceptable for extraction but not yet a true one-click install.
 - **No published releases yet**, so download links from a hosted instance do not currently resolve.
+- **Android is built but not yet released.** CI produces a signed APK once the signing secrets are set; the hosted site keeps pointing Android at the coming-soon page until a release carries one (`DOWNLOADS_PUBLISHED`).
 
 ### CI
 
 Two workflows:
 
 - **`tests.yml`** — runs the full pytest suite on every push and pull request, on ubuntu (desktop mode), ubuntu (hosted mode), and Windows. Installs Chromium and Deno so the browser E2E tests and the JS-runtime tests run for real rather than skipping.
-- **`build-desktop.yml`** — builds Windows (`.exe`) and Linux (`.tar.gz`) on `v*` tags, smoke-tests the backend and a real download on both runners, verifies the bundle contents, and attaches artifacts to the GitHub release. Trigger manually via **workflow_dispatch**.
+- **`build-desktop.yml`** — builds Windows (`.exe`) and Linux (`.tar.gz`) on `v*` tags, smoke-tests the backend and a real download on both runners, verifies the bundle contents, and attaches artifacts to the GitHub release, together with the Android APK. Trigger manually via **workflow_dispatch**.
+- **`android.yml`** — Kotlin unit tests and a debug APK on every push and pull request; checks the Android server against the pinned `openapi-contract.json`.
+- **`build-android.yml`** — the signed release APK, called by `build-desktop.yml` so the release is published with every platform or none.
+
+---
+
+## Android App
+
+> **Status:** Working on an Android 14 emulator, end to end: paste or share a
+> link, choose, download MP4 / MP3 / SRT, and find the file in Downloads. Not
+> yet run on a physical phone, and no release has shipped an APK yet.
+
+The same frontend, served by an embedded Kotlin (Ktor) server inside the app
+and shown in a WebView. Downloads run on the phone through
+[`youtubedl-android`](https://github.com/yausername/youtubedl-android), which
+bundles Python, FFmpeg and QuickJS — nothing to install, no server involved,
+and YouTube sees the phone's own connection rather than a datacenter.
+
+- **Share → MediaGrab** from YouTube, a browser, or any app that shares a link.
+- Files are saved to **Downloads**, de-duplicated as `Title (1).mp4`.
+- Downloads **continue in the background**, with a progress notification.
+- **arm64 only**, about **56 MB**. Android 8.0 (API 26) or newer.
+
+### Build from source
+
+```bash
+bash dev/setup-android.sh            # JDK, Gradle and SDK, all under .toolchain/
+source .toolchain/env.sh
+(cd android && ./gradlew assembleDebug)
+```
+
+The debug APK installs on a phone or an emulator without any key. Release
+builds need a signing key from the environment; see
+[`dev/README.md`](dev/README.md) for signing, the release check
+(`dev/check-apk.py`), and running the app on an emulator.
+
+yt-dlp is pinned in [`android/ytdlp.lock`](android/ytdlp.lock). YouTube breaks
+old yt-dlp releases, so expect to bump it.
 
 ---
 
@@ -277,7 +315,10 @@ MediaGrab/
 │       ├── js_runtime.py    # Which configured JS runtimes are actually installed
 │       ├── cleaner.py       # Retention daemon & deferred file removal
 │       └── templates.py     # Server-side mg-mode injection
-├── static/                  # Frontend (PWA shell + hosted gating)
+├── static/                  # Frontend (PWA shell + hosted gating), shared by every mode
+├── android/                 # Android app: Ktor server + youtubedl-android in a WebView shell
+│   └── ytdlp.lock           # The yt-dlp version bundled into the APK
+├── dev/                     # Android toolchain, emulator sandbox, release check, contract sync
 ├── tests/                   # pytest suite, incl. headless-Chromium E2E
 ├── run_desktop.py           # Desktop launcher with window fallbacks
 ├── packaging/
@@ -286,7 +327,9 @@ MediaGrab/
 │   └── install_deno.py      # Static Deno bundler (yt-dlp JS runtime)
 ├── .github/workflows/
 │   ├── tests.yml            # pytest on push + PR: ubuntu desktop, ubuntu hosted, Windows
-│   └── build-desktop.yml    # Windows + Linux builds on tags
+│   ├── android.yml          # Kotlin tests + debug APK on push + PR
+│   ├── build-android.yml    # Signed release APK (called by build-desktop.yml)
+│   └── build-desktop.yml    # Windows + Linux + Android release on tags
 ├── MULTI_PLATFORM_IMPLEMENTATION_PLAN.md  # Architecture, decisions, milestones
 ├── DESIGN.md                # Design system specification
 └── ARCHITECTURE.md          # Architectural specification
