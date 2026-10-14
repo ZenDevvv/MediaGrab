@@ -1,10 +1,13 @@
 package dev.mediagrab
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.ApplicationInfo
+import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.webkit.WebResourceRequest
@@ -12,6 +15,8 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
@@ -53,6 +58,8 @@ class MainActivity : AppCompatActivity() {
             }
         })
 
+        requestRuntimePermissions()
+
         // First launch extracts the Python runtime, which takes a few seconds;
         // show something rather than a blank white view.
         webView.loadData(STARTING_PAGE, "text/html", "utf-8")
@@ -70,6 +77,27 @@ class MainActivity : AppCompatActivity() {
                 return@launch
             }
             webView.loadUrl(url)
+        }
+    }
+
+    /**
+     * Asked once, up front, rather than at the first download: the request is
+     * asynchronous, and asking mid-download would mean the first file either
+     * waits on a dialog or fails to save. Both are optional in the sense that
+     * a refusal degrades rather than breaks -- no progress notification, or
+     * (26-28 only) a save error the ready screen reports.
+     */
+    private fun requestRuntimePermissions() {
+        val wanted = buildList {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                add(Manifest.permission.POST_NOTIFICATIONS)
+            }
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+                add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
+            }
+        }.filter { ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED }
+        if (wanted.isNotEmpty()) {
+            ActivityCompat.requestPermissions(this, wanted.toTypedArray(), 0)
         }
     }
 

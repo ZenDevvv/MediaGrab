@@ -9,6 +9,7 @@ import dev.mediagrab.contract.InfoResponse
 import dev.mediagrab.contract.JobProgressResponse
 import dev.mediagrab.contract.QualityOption
 import dev.mediagrab.contract.SubtitleOption
+import dev.mediagrab.storage.DownloadsPublisher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -40,8 +41,16 @@ import kotlin.math.abs
  */
 class YoutubeDlEngine(
     context: Context,
+    /** Private staging. Finished files leave it for public Downloads. */
     private val downloadDir: File,
+    private val publisher: DownloadsPublisher,
 ) : Engine {
+
+    /**
+     * Called on every job state change that matters to the foreground
+     * service: a job starting, and a job reaching a terminal state.
+     */
+    @Volatile var onActivityChanged: () -> Unit = {}
 
     private val appContext = context.applicationContext
     private val jobs = ConcurrentHashMap<String, MutableJob>()
@@ -95,10 +104,18 @@ class YoutubeDlEngine(
                 job.status = "extracting"
                 runDownload(job)
             } catch (t: Throwable) {
-                job.status = "error"
-                job.error = t.message ?: "download failed"
+                if (job.status != "cancelled") {
+                    job.status = "error"
+                    job.error = t.message ?: "download failed"
+                }
+            } finally {
+                // Whatever happened, staging is no longer needed: a finished
+                // file has been published, a failed one is junk.
+                job.dir.deleteRecursively()
+                onActivityChanged()
             }
         }
+        onActivityChanged()
         return id
     }
 
@@ -163,6 +180,7 @@ class YoutubeDlEngine(
             job.progress = (fraction * 100).toInt().coerceIn(0, 100)
         }
 
+        if (job.status == "cancelled") return
         if (response.exitCode != 0) {
             job.status = "error"
             job.error = response.err.trim().ifEmpty { "download failed" }
@@ -173,8 +191,23 @@ class YoutubeDlEngine(
         // listing rather than assumed. Assuming produced "samplemp4" once on
         // the desktop build (ARCHITECTURE.md §7.3); do not repeat it.
         val produced = findProducedFile(job)
-        job.filename = produced?.name
-        job.size = produced?.length()?.let(::formatSize)
+        if (produced == null) {
+            job.status = "error"
+            job.error = "yt-dlp finished but produced no file"
+            return
+        }
+
+        job.stage = "Saving to Downloads"
+        val published = try {
+            publisher.publish(produced)
+        } catch (t: Throwable) {
+            job.status = "error"
+            job.error = "Could not save to Downloads: ${t.message}"
+            return
+        }
+        job.published = published
+        job.filename = published.name
+        job.size = formatSize(published.size)
         job.status = "ready"
     }
 
@@ -188,7 +221,6 @@ class YoutubeDlEngine(
             ?.filter { it.isFile && !it.name.startsWith(".") && !it.name.endsWith(".part") }
             ?.maxByOrNull { it.length() }
 
-    /** Highest resolution the user asked for, or the best available. */
     /**
      * Desktop's chain (app/services/downloader.py): H.264 MP4 + M4A first, so
      * the result remuxes and plays everywhere, and only then anything within
@@ -209,22 +241,44 @@ class YoutubeDlEngine(
                 jobId = job.id,
                 status = job.status,
                 progress = job.progress.toDouble(),
+                stage = job.stage,
                 filename = job.filename,
                 size = job.size,
                 error = job.error,
                 downloadUrl = if (job.status == "ready") "/api/file/${job.id}" else null,
                 queuePosition = 0,
-                activeSlots = 1,
+                activeSlots = activeCount(),
             )
         }
 
+    override fun file(jobId: String): StoredFile? {
+        val job = jobs[jobId]?.takeIf { it.status == "ready" } ?: return null
+        val published = job.published ?: return null
+        return StoredFile(
+            name = published.name,
+            mimeType = mimeTypeFor(published.name),
+            size = published.size,
+            open = { publisher.open(published.uri) },
+        )
+    }
+
+    /** Jobs that have not reached a terminal state. */
+    fun activeCount(): Int = jobs.values.count { it.status !in TERMINAL }
+
+    /** Progress of the oldest active job, for the notification. */
+    fun leadProgress(): Int? = jobs.values.firstOrNull { it.status !in TERMINAL }?.progress
+
     override fun abort(jobId: String): Boolean {
         val job = jobs[jobId] ?: return false
-        if (job.status in setOf("ready", "error", "cancelled")) return false
-        // destroyProcessById kills the python child process tree, not just the
-        // handle, which is what stops the download actually continuing.
-        YoutubeDL.getInstance().destroyProcessById(jobId)
+        if (job.status in TERMINAL) return false
+        // Status first, so the download coroutine sees the cancel and does not
+        // record the killed process's non-zero exit as an error.
         job.status = "cancelled"
+        // destroyProcessById kills the python child process tree, not just the
+        // handle, which is what stops the download actually continuing. The
+        // coroutine's finally then purges the job's staging directory.
+        YoutubeDL.getInstance().destroyProcessById(jobId)
+        onActivityChanged()
         return true
     }
 
@@ -245,6 +299,8 @@ class YoutubeDlEngine(
         @Volatile var filename: String? = null
         @Volatile var size: String? = null
         @Volatile var error: String? = null
+        @Volatile var stage: String? = null
+        @Volatile var published: DownloadsPublisher.Published? = null
 
         val outputTemplate: String
             get() = File(dir, "%(title).150B.%(ext)s").absolutePath
@@ -269,6 +325,8 @@ class YoutubeDlEngine(
     }
 
 }
+
+private val TERMINAL = setOf("ready", "error", "cancelled")
 
 /** Resolutions offered in the chooser. */
 private val STANDARD = listOf(240, 360, 480, 720, 1080, 1440, 2160)

@@ -9,7 +9,9 @@ import dev.mediagrab.contract.JsRuntimeResponse
 import dev.mediagrab.contract.LimitsResponse
 import dev.mediagrab.engine.Engine
 import dev.mediagrab.engine.EngineException
+import io.ktor.http.ContentDisposition
 import io.ktor.http.ContentType
+import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
@@ -21,13 +23,17 @@ import io.ktor.server.engine.embeddedServer
 import io.ktor.server.plugins.contentnegotiation.ContentNegotiation
 import io.ktor.server.request.receive
 import io.ktor.server.response.respond
+import io.ktor.server.response.header
 import io.ktor.server.response.respondBytes
+import io.ktor.server.response.respondOutputStream
 import io.ktor.server.response.respondTextWriter
 import io.ktor.server.routing.Route
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
 import io.ktor.server.routing.routing
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -47,6 +53,12 @@ class ApiServer(
     private val mediaEngine: Engine,
     private val webAssets: WebAssets,
     private val version: String = "dev",
+    /**
+     * Show the user's Downloads, for `/api/open-folder`. A hook rather than an
+     * Android call so the server stays JVM-testable; returns false if nothing
+     * could be opened.
+     */
+    private val revealDownloads: () -> Boolean = { false },
 ) {
     fun module(): Application.() -> Unit = {
         install(ContentNegotiation) {
@@ -67,7 +79,7 @@ class ApiServer(
             // which carries its own `engine` property and would otherwise shadow
             // this one -- silently passing an ApplicationEngine where an Engine
             // belongs.
-            installApiRoutes(mediaEngine, webAssets, version)
+            installApiRoutes(mediaEngine, webAssets, version, revealDownloads)
             installAssetRoutes(webAssets)
         }
     }
@@ -77,6 +89,7 @@ private fun Route.installApiRoutes(
     engine: Engine,
     assets: WebAssets,
     version: String,
+    revealDownloads: () -> Boolean,
 ) {
     // The frontend calls this before anything else and branches on it, so it
     // must answer even when the media engine is broken.
@@ -163,16 +176,37 @@ private fun Route.installApiRoutes(
         }
     }
 
-    // Hosted-only in the Python app. A no-op here that still answers, so the
-    // frontend's capability-driven UI does not break on a 404.
+    // Desktop semantics: the file is already in Downloads, and the ready
+    // screen's button asks to be shown it. A failure is a 500, as in Python,
+    // which the frontend turns into a "Saved to Downloads" label.
     post("/api/open-folder") {
-        call.respond(mapOf("opened" to false))
+        if (revealDownloads()) {
+            call.respond(mapOf("opened" to "Downloads"))
+        } else {
+            call.respondError(HttpStatusCode.InternalServerError, "Could not open folder")
+        }
     }
 
     get("/api/file/{jobId}") {
-        // Serving bytes is the engine's job on device; until it lands, answer
-        // honestly rather than 200 with an empty body.
-        call.respondError(HttpStatusCode.NotFound, "no finished file for this job")
+        // No separate subtitle file on Android: captions are embedded, or an
+        // SRT job's output *is* the main file.
+        val wantsSrt = call.request.queryParameters["srt"]?.toBoolean() == true
+        val file = if (wantsSrt) null else engine.file(call.parameters["jobId"].orEmpty())
+        if (file == null) {
+            call.respondError(HttpStatusCode.NotFound, "File not found on server")
+            return@get
+        }
+        // Never deleted after retrieval: like desktop, the file is the user's,
+        // in their Downloads. Retention applies to hosted only.
+        call.response.header(
+            HttpHeaders.ContentDisposition,
+            ContentDisposition.Attachment
+                .withParameter(ContentDisposition.Parameters.FileName, file.name)
+                .toString(),
+        )
+        call.respondOutputStream(ContentType.parse(file.mimeType), contentLength = file.size) {
+            withContext(Dispatchers.IO) { file.open().use { it.copyTo(this@respondOutputStream) } }
+        }
     }
 }
 

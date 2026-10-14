@@ -5,6 +5,8 @@ import dev.mediagrab.contract.JobProgressResponse
 import dev.mediagrab.contract.QualityOption
 import dev.mediagrab.engine.Engine
 import dev.mediagrab.engine.EngineException
+import dev.mediagrab.engine.StoredFile
+import dev.mediagrab.engine.mimeTypeFor
 import dev.mediagrab.contract.DownloadRequest
 
 /**
@@ -25,6 +27,8 @@ class FakeEngine(
     }
     var jobs = mutableMapOf<String, JobProgressResponse>()
     var failWith: Throwable? = null
+    /** Bytes served for a ready job, keyed by job id. */
+    val files = mutableMapOf<String, ByteArray>()
     private var jobCount = 0
 
     override suspend fun inspect(url: String): InfoResponse {
@@ -46,6 +50,12 @@ class FakeEngine(
     }
 
     override fun progress(jobId: String): JobProgressResponse? = jobs[jobId]
+
+    override fun file(jobId: String): StoredFile? {
+        if (jobs[jobId]?.status != "ready") return null
+        val bytes = files[jobId] ?: return null
+        return StoredFile("Me at the zoo.mp4", mimeTypeFor("x.mp4"), bytes.size.toLong()) { bytes.inputStream() }
+    }
 
     override fun abort(jobId: String): Boolean {
         aborted += jobId

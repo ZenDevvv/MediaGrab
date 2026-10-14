@@ -9,6 +9,7 @@ import io.ktor.client.request.get
 import io.ktor.client.request.post
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
+import io.ktor.client.statement.readRawBytes
 import io.ktor.http.ContentType
 import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
@@ -34,11 +35,16 @@ class ApiServerTest {
     private lateinit var client: HttpClient
     private var base = ""
     private val engine = FakeEngine()
+    private var revealed = 0
+    private var revealSucceeds = true
 
     @Before
     fun startServer() {
         val assets = DirectoryAssets(File(System.getProperty("mediagrab.webRoot")))
-        server = ApiServer(engine, assets, version = "test-1").start(wait = false)
+        server = ApiServer(
+            engine, assets, version = "test-1",
+            revealDownloads = { revealed++; revealSucceeds },
+        ).start(wait = false)
         base = "http://127.0.0.1:" +
             runBlocking { server.engine.resolvedConnectors() }.first().port
         client = HttpClient(CIO)
@@ -201,5 +207,50 @@ class ApiServerTest {
     fun `events for an unknown job is a 404 rather than an endless stream`() {
         val status = runBlocking { client.get("$base/api/events/nope").status.value }
         assertEquals(404, status)
+    }
+
+    // --- the finished file ------------------------------------------------------
+
+    @Test
+    fun `file streams the finished download with its name`() {
+        val id = json("/api/download", """{"url":"x"}""").getString("job_id")
+        val bytes = ByteArray(70_000) { (it % 251).toByte() }
+        engine.files[id] = bytes
+        engine.jobs[id] = engine.jobs.getValue(id).copy(status = "ready")
+
+        val response = runBlocking { client.get("$base/api/file/$id") }
+        assertEquals(200, response.status.value)
+        assertEquals("video/mp4", response.headers["Content-Type"])
+        assertTrue(
+            response.headers["Content-Disposition"].orEmpty(),
+            response.headers["Content-Disposition"].orEmpty().contains("Me at the zoo.mp4"),
+        )
+        // Byte-for-byte, and longer than one copy buffer.
+        assertTrue(bytes.contentEquals(runBlocking { response.readRawBytes() }))
+    }
+
+    @Test
+    fun `file is a 404 until the job is ready, and for an srt sidecar`() {
+        val id = json("/api/download", """{"url":"x"}""").getString("job_id")
+        engine.files[id] = byteArrayOf(1, 2, 3)
+        assertEquals(404, runBlocking { client.get("$base/api/file/$id") }.status.value)
+
+        engine.jobs[id] = engine.jobs.getValue(id).copy(status = "ready")
+        // Captions are embedded on Android; there is no separate subtitle file.
+        assertEquals(404, runBlocking { client.get("$base/api/file/$id?srt=true") }.status.value)
+        assertEquals(404, runBlocking { client.get("$base/api/file/nope") }.status.value)
+    }
+
+    @Test
+    fun `open-folder reveals Downloads, and is a 500 when nothing can`() {
+        assertEquals(200 to "Downloads", postWithStatus("/api/open-folder", "").let {
+            it.first to JSONObject(it.second).getString("opened")
+        })
+        assertEquals(1, revealed)
+
+        // The frontend relabels the button on a non-OK response, so a failure
+        // must not be a 200.
+        revealSucceeds = false
+        assertEquals(500, postWithStatus("/api/open-folder", "").first)
     }
 }

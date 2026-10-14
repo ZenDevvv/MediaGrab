@@ -1,11 +1,15 @@
 package dev.mediagrab
 
 import android.app.Application
+import android.app.DownloadManager
+import android.content.ActivityNotFoundException
+import android.content.Intent
 import android.util.Log
 import dev.mediagrab.engine.YoutubeDlEngine
 import dev.mediagrab.server.ApiServer
 import dev.mediagrab.server.ApkAssets
 import dev.mediagrab.server.start
+import dev.mediagrab.storage.DownloadsPublisher
 import io.ktor.server.engine.EmbeddedServer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
@@ -27,12 +31,22 @@ class MediaGrabApp : Application() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
+    /** The download engine. Shared with [DownloadService], which watches it. */
+    val engine: YoutubeDlEngine by lazy {
+        // Private staging; finished files are published to Downloads.
+        YoutubeDlEngine(this, File(filesDir, "downloads"), DownloadsPublisher(this)).also {
+            it.onActivityChanged = {
+                // Only ever *starts* the service: it stops itself once the
+                // engine reports nothing active, so no stop races a new job.
+                if (it.activeCount() > 0) DownloadService.start(this)
+            }
+        }
+    }
+
     /** The base URL the WebView should load, once the server is listening. */
     val backend: Deferred<String> by lazy { scope.async { startBackend() } }
 
     private suspend fun startBackend(): String {
-        // Private staging until MediaStore saving lands (step 5).
-        val engine = YoutubeDlEngine(this, File(filesDir, "downloads"))
         try {
             engine.initialise()
         } catch (t: Throwable) {
@@ -46,12 +60,25 @@ class MediaGrabApp : Application() {
             engine,
             ApkAssets { path -> assets.open("web/$path") },
             version = packageManager.getPackageInfo(packageName, 0).versionName ?: "dev",
+            revealDownloads = ::revealDownloads,
         )
         val server = bind(api)
         val port = server.engine.resolvedConnectors().first().port
         Log.i(TAG, "backend listening on 127.0.0.1:$port")
         return "http://127.0.0.1:$port/"
     }
+
+    /** The system Downloads app, as desktop opens its file manager. */
+    private fun revealDownloads(): Boolean =
+        try {
+            startActivity(
+                Intent(DownloadManager.ACTION_VIEW_DOWNLOADS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            )
+            true
+        } catch (t: ActivityNotFoundException) {
+            Log.w(TAG, "no Downloads app to open", t)
+            false
+        }
 
     /**
      * A fixed port, because the port is part of the page's origin: on an
