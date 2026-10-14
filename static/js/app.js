@@ -733,6 +733,8 @@
   }
 
   // --- API Client: Metadata Inspection ---
+  const INSPECT_TIMEOUT_MS = 120000;
+
   async function inspectUrl(url) {
     const errEl = $('#inspect-error');
     if (errEl) errEl.hidden = true;
@@ -744,15 +746,24 @@
       grabBtn.textContent = 'Inspecting...';
     }
 
+    // A stuck yt-dlp would otherwise leave /choose on its placeholders forever.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), INSPECT_TIMEOUT_MS);
+
     try {
       const resp = await fetch(`${API_BASE}/info`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url })
+        body: JSON.stringify({ url }),
+        signal: controller.signal
       });
 
       if (resp.status === 451) {
-        showYouTubeUpsell(detailPayload(await resp.json().catch(() => ({}))));
+        const payload = detailPayload(await resp.json().catch(() => ({})));
+        // Only the landing page has the upsell card. A link shared straight
+        // into /choose has nowhere to show it, so say it with the error screen.
+        if ($('#yt-upsell')) showYouTubeUpsell(payload);
+        else { AppState.currentUrl = url; showError(payload.message || 'This link could not be read.'); }
         return;
       }
       if (!resp.ok) {
@@ -783,14 +794,21 @@
       populateChooser(data);
       showScreen('choose');
     } catch (err) {
+      const message = err.name === 'AbortError'
+        ? 'Reading the link took too long. Check your connection and try again.'
+        : err.message || 'Unable to inspect URL.';
       if (inpCont) inpCont.classList.add('bad');
       if (errEl) {
-        errEl.textContent = err.message || 'Unable to inspect URL.';
+        errEl.textContent = message;
         errEl.hidden = false;
       } else {
-        alert(err.message || 'Unable to inspect URL.');
+        // /choose has no inline error line, and the Android WebView silently
+        // drops alert(), which left a shared link stuck on the placeholders.
+        AppState.currentUrl = url;
+        showError(message);
       }
     } finally {
+      clearTimeout(timer);
       if (grabBtn) {
         grabBtn.disabled = false;
         grabBtn.textContent = 'Grab';
@@ -2250,6 +2268,7 @@
     // opens /choose?url=... for a link shared into it, and the stored metadata
     // then belongs to the previous video. Same URL means a reload; reuse it.
     if (queryUrl && queryUrl !== url) {
+      showInspecting(queryUrl);
       inspectUrl(queryUrl);
     } else if (meta) {
       AppState.metadata = meta;
@@ -2257,10 +2276,18 @@
       populateChooser(meta);
       showScreen('choose');
     } else if (queryUrl) {
+      showInspecting(queryUrl);
       inspectUrl(queryUrl);
     } else {
       window.location.href = '/';
     }
+  }
+
+  // The static placeholders ("Title", "Channel") read as a finished page.
+  function showInspecting(url) {
+    $('#choose-title').textContent = 'Reading link…';
+    $('#choose-uploader').textContent = url;
+    $('#choose-duration').textContent = '--:--';
   }
 
   // --- PWA Service Worker & Install Prompt ---

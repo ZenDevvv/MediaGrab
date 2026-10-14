@@ -19,6 +19,9 @@ import kotlinx.serialization.json.jsonArray
  */
 internal const val VIDEO_FORMAT_SORT = "res,vcodec:h264,acodec:aac"
 
+/** Desktop's YTDLP_PLAYER_CLIENTS default; inspect and download must agree. */
+internal const val YOUTUBE_EXTRACTOR_ARGS = "youtube:player_client=tv_embedded,default,android_vr"
+
 internal val STANDARD_HEIGHTS = listOf(2160, 1440, 1080, 720, 480, 360, 240, 144)
 
 /** Cap for a label with no number ("Original", a source reporting no heights). */

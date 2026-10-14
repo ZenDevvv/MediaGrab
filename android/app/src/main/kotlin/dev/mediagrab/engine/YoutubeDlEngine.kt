@@ -107,6 +107,7 @@ class YoutubeDlEngine(
             .addOption("-J")
             .addOption("--no-playlist")
             .addOption("--no-warnings")
+            .addOption("--extractor-args", YOUTUBE_EXTRACTOR_ARGS)
 
         val response = YoutubeDL.getInstance().execute(request)
         if (response.exitCode != 0) {
@@ -156,7 +157,7 @@ class YoutubeDlEngine(
             // Same player-client policy as the desktop app, so both produce
             // the same formats for the same URL. Divergence here would mean
             // the chooser showing options that then fail.
-            addOption("--extractor-args", "youtube:player_client=tv_embedded,default,android_vr")
+            addOption("--extractor-args", YOUTUBE_EXTRACTOR_ARGS)
 
             when (job.download.mp4Mode) {
                 "mp3" -> {

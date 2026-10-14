@@ -10,7 +10,9 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
+import android.webkit.ConsoleMessage
 import android.webkit.CookieManager
+import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -46,6 +48,14 @@ class MainActivity : AppCompatActivity() {
             // app.js keeps theme and history in localStorage.
             settings.domStorageEnabled = true
             webViewClient = LoopbackOnlyClient()
+            // Without a chrome client alert() and console output vanish. Put
+            // the page's console in logcat (tag MediaGrab-Web).
+            webChromeClient = object : WebChromeClient() {
+                override fun onConsoleMessage(message: ConsoleMessage): Boolean {
+                    Log.i("MediaGrab-Web", "${message.message()} (${message.sourceId()}:${message.lineNumber()})")
+                    return true
+                }
+            }
         }
         setContentView(webView)
 
