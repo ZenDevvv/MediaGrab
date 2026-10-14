@@ -339,6 +339,25 @@ private suspend fun ApplicationCall.respondError(
 }
 
 /**
+ * Start on [preferred], or on an ephemeral port if it is taken.
+ *
+ * The app wants a fixed port because the port is part of the page origin, and
+ * a new origin each launch would empty the frontend's localStorage. But
+ * another app holding it must not stop MediaGrab from starting.
+ */
+fun ApiServer.startPreferring(preferred: Int): EmbeddedServer<*, *> =
+    try {
+        start(port = preferred)
+    } catch (e: Exception) {
+        // Ktor reports a taken port as a JobCancellationException with the
+        // BindException somewhere down its causes, so match on the chain.
+        // Anything else is a real failure and must not be retried on another
+        // port as if it were a conflict.
+        if (generateSequence<Throwable>(e) { it.cause }.none { it is java.net.BindException }) throw e
+        start(port = 0)
+    }
+
+/**
  * Start on loopback and return the server. [port] 0 picks an ephemeral port,
  * which is what the tests want; the app asks for a fixed one (see Backend).
  */

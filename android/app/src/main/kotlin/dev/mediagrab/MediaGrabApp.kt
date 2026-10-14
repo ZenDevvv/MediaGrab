@@ -8,9 +8,8 @@ import android.util.Log
 import dev.mediagrab.engine.YoutubeDlEngine
 import dev.mediagrab.server.ApiServer
 import dev.mediagrab.server.ApkAssets
-import dev.mediagrab.server.start
+import dev.mediagrab.server.startPreferring
 import dev.mediagrab.storage.DownloadsPublisher
-import io.ktor.server.engine.EmbeddedServer
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
@@ -64,7 +63,10 @@ class MediaGrabApp : Application() {
             version = packageManager.getPackageInfo(packageName, 0).versionName ?: "dev",
             revealDownloads = ::revealDownloads,
         )
-        val server = bind(api)
+        // Fixed, because the port is part of the page origin: an ephemeral one
+        // would be a new origin each launch and empty localStorage (theme,
+        // history). Falls back if another app holds it; see startPreferring.
+        val server = api.startPreferring(PREFERRED_PORT)
         val port = server.engine.resolvedConnectors().first().port
         Log.i(TAG, "backend listening on 127.0.0.1:$port")
         return "http://127.0.0.1:$port/"
@@ -97,20 +99,6 @@ class MediaGrabApp : Application() {
         } catch (t: ActivityNotFoundException) {
             Log.w(TAG, "no Downloads app to open", t)
             false
-        }
-
-    /**
-     * A fixed port, because the port is part of the page's origin: on an
-     * ephemeral one, every launch would be a new origin and the frontend's
-     * localStorage (theme, history) would be empty each time. Falls back to
-     * ephemeral rather than failing if something else holds it.
-     */
-    private fun bind(api: ApiServer): EmbeddedServer<*, *> =
-        try {
-            api.start(port = PREFERRED_PORT)
-        } catch (t: Throwable) {
-            Log.w(TAG, "port $PREFERRED_PORT unavailable, using an ephemeral one", t)
-            api.start(port = 0)
         }
 
     private companion object {
