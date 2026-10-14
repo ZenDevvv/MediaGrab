@@ -202,11 +202,21 @@ class YoutubeDlEngine(
         }
 
         job.status = "downloading"
-        // The callback's first argument is a percentage -- the library parses
-        // yt-dlp's "37.5%" -- not a fraction. Multiplying it by 100 pinned the
-        // bar at 100% from the first tick; found on the emulator.
-        val response = YoutubeDL.getInstance().execute(request, job.id) { percent, _, _ ->
-            job.progress = percent.toInt().coerceIn(0, 100)
+        // Every stdout line arrives here. The library's own percentage is
+        // per stream, so a video+audio download would run 0..100 twice; the
+        // tracker weights the streams and reads speed, ETA and size the way
+        // desktop reports them.
+        val tracker = ProgressTracker()
+        val response = YoutubeDL.getInstance().execute(request, job.id) { _, _, line ->
+            val update = tracker.onLine(line) ?: return@execute
+            // A cancel must not be overwritten by a late progress line.
+            if (job.status == "cancelled") return@execute
+            update.status?.let { job.status = it }
+            update.progress?.let { job.progress = it.coerceIn(0, 100) }
+            update.speed?.let { job.speed = it }
+            update.eta?.let { job.eta = it }
+            update.got?.let { job.got = it }
+            update.stage?.let { job.stage = it }
         }
 
         if (job.status == "cancelled") return
@@ -240,6 +250,7 @@ class YoutubeDlEngine(
         job.published = published
         job.filename = published.name
         job.size = formatSize(published.size)
+        job.progress = 100
         job.status = "ready"
     }
 
@@ -273,6 +284,9 @@ class YoutubeDlEngine(
                 jobId = job.id,
                 status = job.status,
                 progress = job.progress.toDouble(),
+                speed = job.speed,
+                eta = job.eta,
+                got = job.got,
                 stage = job.stage,
                 filename = job.filename,
                 size = job.size,
@@ -332,6 +346,9 @@ class YoutubeDlEngine(
         @Volatile var size: String? = null
         @Volatile var error: String? = null
         @Volatile var stage: String? = null
+        @Volatile var speed: String? = null
+        @Volatile var eta: String? = null
+        @Volatile var got: String? = null
         @Volatile var published: DownloadsPublisher.Published? = null
 
         val outputTemplate: String
