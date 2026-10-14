@@ -52,6 +52,7 @@ tar -C "$REPO_ROOT" \
     --exclude='.git' --exclude='.venv' --exclude='downloads' \
     --exclude='dist' --exclude='build' --exclude='ffmpeg' \
     --exclude='__pycache__' --exclude='.pytest_cache' \
+    --exclude='./.toolchain' --exclude='./android' --exclude='./deno' \
     -czf "$STAGE" .
 
 echo "[deploy] Syncing to $VM_ID:$REMOTE_DIR"
