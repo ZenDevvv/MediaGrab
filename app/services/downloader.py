@@ -1,6 +1,7 @@
 import asyncio
 import os
 import re
+import shutil
 import traceback
 from pathlib import Path
 from typing import Dict, Any, Optional
@@ -153,11 +154,17 @@ def create_ydl_opts(
     # job-id prefix because its files are ephemeral and never seen twice
     # (§1.3 Decision #13).
     if config.USER_FACING_FILENAMES:
-        out_template = str(DOWNLOADS_DIR / "%(title).150B.%(ext)s")
-        # Direct yt-dlp's scratch files to a per-job staging directory. Without
-        # this, partials land in the user's Downloads folder where they cannot
-        # be told apart from a concurrent job's fragments -- mtime does not
-        # discriminate, because both are written at the same moment (§1.3 #13).
+        out_template = "%(title).150B.%(ext)s"
+        # yt-dlp writes everything -- partials, intermediates, thumbnails and
+        # the finished file -- into a per-job staging directory, and
+        # execute_download moves the result into Downloads under a free name.
+        #
+        # Writing straight into Downloads meant yt-dlp saw the user's earlier
+        # files: a second grab of the same title returned the old file as
+        # "already downloaded" (a full video came back as an earlier 10 s
+        # clip), and an MP3 grab adopted an existing Title.mp4 as its source
+        # and then deleted it after extracting the audio. Partials there also
+        # could not be told apart from a concurrent job's (§1.3 #13).
         staging = config.DOWNLOADS_DIR / f".mediagrab-{job_id}"
         staging.mkdir(parents=True, exist_ok=True)
     else:
@@ -171,10 +178,10 @@ def create_ydl_opts(
         _raise_if_cancelled(job_id)
         status = d.get('status')
         if status == 'finished':
-            # yt-dlp resolves %(title)s and any collision suffix internally, so
-            # its chosen filepath is the only reliable source of the output
-            # name. Globbing by job id cannot work once the prefix is dropped
-            # for user-facing filenames (§1.3 Decision #13).
+            # yt-dlp resolves %(title)s internally, so its chosen filepath is
+            # the only reliable source of the output name. Globbing by job id
+            # cannot work once the prefix is dropped for user-facing filenames
+            # (§1.3 Decision #13).
             info = d.get('info_dict') or {}
             resolved = info.get('filepath') or info.get('_filename')
             if resolved:
@@ -248,7 +255,7 @@ def create_ydl_opts(
 
     opts: Dict[str, Any] = {
         'outtmpl': out_template,
-        **({'paths': {'home': str(config.DOWNLOADS_DIR), 'temp': str(staging)}} if staging else {}),
+        **({'paths': {'home': str(staging)}} if staging else {}),
         'quiet': True,
         'no_warnings': True,
         'progress_hooks': [progress_hook],
@@ -343,6 +350,10 @@ def create_ydl_opts(
             {
                 'key': 'FFmpegSubtitlesConvertor',
                 'format': 'srt',
+                # As yt-dlp's own --convert-subs registers it. The default
+                # ('post_process') never runs under skip_download, so the
+                # .vtt was handed over unconverted.
+                'when': 'before_dl',
             }
         ]
 
@@ -375,6 +386,55 @@ def _final_output_paths(result: Any) -> list:
                 paths.append(Path(value))
                 break
     return paths
+
+
+def _is_within(path: Path, directory: Path) -> bool:
+    try:
+        path.resolve().relative_to(directory.resolve())
+        return True
+    except ValueError:
+        return False
+
+
+def _is_scratch(path: Path) -> bool:
+    """yt-dlp's in-progress and bookkeeping files, never a result."""
+    return path.name.startswith(".") or path.suffix.lower() in (".part", ".ytdl", ".temp")
+
+
+def _claim_free_name(directory: Path, name: str) -> Path:
+    """Reserve ``name`` in ``directory``, or ``Stem (n).ext`` if it is taken.
+
+    Reserved by exclusive creation, so two jobs finishing with the same title
+    at the same moment cannot both pick the same name; the caller then
+    replaces the empty placeholder with the real file.
+    """
+    stem, suffix = Path(name).stem, Path(name).suffix
+    for n in range(0, 10000):
+        candidate = directory / (name if n == 0 else f"{stem} ({n}){suffix}")
+        try:
+            with open(candidate, "xb"):
+                return candidate
+        except FileExistsError:
+            continue
+    raise FileExistsError(f"No free name for {name} in {directory}")
+
+
+def _publish_from_staging(path: Path, staging: Path, downloads: Path) -> Path:
+    """Move a finished file out of the job's staging directory into Downloads.
+
+    Never overwrites: an existing file of the same name is the user's, so the
+    new one becomes ``Title (1).mp4`` and so on. A path already outside the
+    staging directory is returned as is.
+    """
+    if not _is_within(path, staging):
+        return path
+    target = _claim_free_name(downloads, path.name)
+    try:
+        os.replace(path, target)
+    except OSError:
+        target.unlink(missing_ok=True)
+        raise
+    return target
 
 
 def _sync_download(
@@ -447,20 +507,14 @@ async def execute_download(job_id: str, request: DownloadRequest):
     produced_files: list = []
 
     def _cleanup_staging_dir() -> None:
-        """Remove the now-empty per-job scratch directory, if present."""
-        if staging_dir is None or not staging_dir.is_dir():
-            return
-        try:
-            next(staging_dir.iterdir())
-            return  # not empty: something is still in use, leave it alone
-        except StopIteration:
-            pass
-        except OSError:
-            return
-        try:
-            staging_dir.rmdir()
-        except OSError:
-            pass
+        """Remove the per-job scratch directory and whatever is left in it.
+
+        Everything yt-dlp wrote lives there and the result has already been
+        moved out, so the remainder is scratch: intermediates, a thumbnail
+        that was embedded, subtitle files that were.
+        """
+        if staging_dir is not None:
+            shutil.rmtree(staging_dir, ignore_errors=True)
 
     def purge_partials() -> None:
         """Remove every artifact this job produced, completed or not.
@@ -469,12 +523,12 @@ async def execute_download(job_id: str, request: DownloadRequest):
         never touch a concurrent job's files. In hosted mode the job-id prefix
         provides the same isolation.
         """
-        candidates = set(produced_files)
         if staging_dir is not None:
-            if staging_dir.is_dir():
-                for leftover in staging_dir.iterdir():
-                    candidates.add(leftover)
+            # Only paths inside our own staging directory: on desktop anything
+            # outside it is the user's Downloads folder.
+            candidates = {p for p in produced_files if _is_within(p, staging_dir)}
         else:
+            candidates = set(produced_files)
             candidates.update(config.DOWNLOADS_DIR.glob(f"{job_id}_*"))
 
         for leftover in candidates:
@@ -483,12 +537,7 @@ async def execute_download(job_id: str, request: DownloadRequest):
                     leftover.unlink()
             except OSError:
                 pass
-        if staging_dir is not None:
-            try:
-                if staging_dir.is_dir():
-                    staging_dir.rmdir()
-            except OSError:
-                pass
+        _cleanup_staging_dir()
 
     try:
         await loop.run_in_executor(
@@ -499,6 +548,13 @@ async def execute_download(job_id: str, request: DownloadRequest):
         # Locate completed files. Prefer what yt-dlp reported; fall back to a glob
         # only in hosted mode, where the job-id prefix is guaranteed.
         matching_files = [p for p in produced_files if p.exists()]
+        if staging_dir is not None and staging_dir.is_dir():
+            # A subtitle-only job reports no download at all -- yt-dlp's result
+            # carries the converted .srt under requested_subtitles, not
+            # filepath -- so the staging directory is the authoritative list.
+            for f in sorted(staging_dir.iterdir()):
+                if f.is_file() and f not in matching_files and not _is_scratch(f):
+                    matching_files.append(f)
         if not config.USER_FACING_FILENAMES:
             matching_files = list(DOWNLOADS_DIR.glob(f"{job_id}_*"))
         if not matching_files:
@@ -511,7 +567,7 @@ async def execute_download(job_id: str, request: DownloadRequest):
         for f in matching_files:
             if f.suffix.lower() == ".srt":
                 srt_file = f
-            elif f.suffix.lower() in [".mp4", ".mp3", ".m4a", ".webm"]:
+            elif f.suffix.lower() in [".mp4", ".mp3", ".m4a", ".webm", ".mkv"]:
                 primary_file = f
 
         if not primary_file and srt_file:
@@ -519,6 +575,13 @@ async def execute_download(job_id: str, request: DownloadRequest):
 
         if not primary_file:
             primary_file = matching_files[0]
+
+        if staging_dir is not None:
+            moved = {}
+            for f in {primary_file, srt_file} - {None}:
+                moved[f] = _publish_from_staging(f, staging_dir, config.DOWNLOADS_DIR)
+            primary_file = moved[primary_file]
+            srt_file = moved.get(srt_file) if srt_file else None
 
         file_stat = primary_file.stat()
         size_str = format_size(file_stat.st_size)
@@ -545,11 +608,6 @@ async def execute_download(job_id: str, request: DownloadRequest):
             srt_filename=srt_display_name,
             stage="Ready to save"
         )
-
-    # The finished file has been moved out of the staging directory by
-        # yt-dlp, so the directory is now empty and must go too, or every
-        # desktop download would leave a .mediagrab-<id> folder behind.
-        _cleanup_staging_dir()
 
     except DownloadCancelled:
         purge_partials()
@@ -604,6 +662,10 @@ async def execute_download(job_id: str, request: DownloadRequest):
         print(f"[MediaGrab] JOB {job_id} FAILED: {type(e).__name__}: {e}")
         job_manager.update_job(job_id, status="error", error=f"Processing failed: {str(e)}")
     finally:
+        # Success, cancel or failure alike: anything worth keeping has been
+        # moved into Downloads by now, and the rest must not pile up as
+        # .mediagrab-<id> folders there.
+        _cleanup_staging_dir()
         if server:
             server.close()
             try:
