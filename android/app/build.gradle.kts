@@ -235,6 +235,7 @@ dependencies {
 tasks.withType<Test>().configureEach {
     systemProperty("mediagrab.webRoot", File(repoRoot, "static").absolutePath)
     systemProperty("mediagrab.contract", File(repoRoot, "openapi-contract.json").absolutePath)
+    systemProperty("mediagrab.fixtures", File(repoRoot, "tests/fixtures").absolutePath)
     testLogging {
         events("passed", "failed", "skipped")
         showStandardStreams = false

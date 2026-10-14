@@ -1,0 +1,23 @@
+{
+  "title": "Big Buck Bunny",
+  "uploader": "Blender",
+  "channel": "Blender",
+  "duration": 596,
+  "thumbnail": "https://i.example.invalid/hq.jpg",
+  "subtitles": { "en": [{"ext": "vtt"}] },
+  "automatic_captions": { "fr": [{"ext": "vtt"}] },
+  "formats": [
+    {"height": 1080, "vcodec": "avc1.640028", "acodec": "none", "ext": "mp4",
+     "filesize": 120000000, "abr": 128.0, "tbr": 3000.0},
+    {"height": 1080, "vcodec": "avc1.640028", "acodec": "mp4a.40.2", "ext": "mp4",
+     "filesize": 150000000, "abr": 192.0, "tbr": 3200.0},
+    {"height": 720, "vcodec": "avc1.4d401f", "acodec": "mp4a.40.2", "ext": "mp4",
+     "filesize": 50000000, "abr": 128.0, "tbr": 1500.0},
+    {"height": 360, "vcodec": "vp9", "acodec": "none", "ext": "webm",
+     "filesize": 8000000, "abr": 96.0},
+    {"height": 144, "vcodec": "avc1", "acodec": "none", "ext": "mp4",
+     "filesize": 500000, "abr": 64.0},
+    {"vcodec": "none", "acodec": "opus", "abr": 160.0},
+    {"vcodec": "none", "acodec": "mp4a.40.2", "abr": 128.0}
+  ]
+}

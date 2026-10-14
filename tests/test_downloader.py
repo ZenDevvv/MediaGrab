@@ -39,7 +39,11 @@ def test_create_ydl_opts_mp4():
     opts = create_ydl_opts("job12345", req)
 
     assert opts['merge_output_format'] == 'mp4'
-    assert "bestvideo[height<=1080]" in opts['format']
+    # The same rule /api/info prices qualities with (app/services/formats.py).
+    from app.services.formats import VIDEO_FORMAT_SORT, video_format_spec
+    assert opts['format'] == video_format_spec("1080p")
+    assert "[height<=1080]" in opts['format']
+    assert opts['format_sort'] == VIDEO_FORMAT_SORT
     assert opts['force_keyframes_at_cuts'] is True
     assert 'download_ranges' in opts
     assert opts['writesubtitles'] is True

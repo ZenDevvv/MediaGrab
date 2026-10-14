@@ -9,6 +9,7 @@ import yt_dlp
 from app import config
 from app.api.schemas import DownloadRequest
 from app.config import DOWNLOADS_DIR
+from app.services.formats import VIDEO_FORMAT_SORT, video_format_spec
 from app.services.jobs import job_manager
 from app.services.youtube_circuit import circuit as youtube_circuit, is_youtube_url
 from app.services.extractor import is_upstream_refusal
@@ -295,16 +296,11 @@ def create_ydl_opts(
 
     # Mode 1: Video (MP4)
     if request.mode == "mp4":
-        height_map = {"2160p": 2160, "1440p": 1440, "1080p": 1080, "720p": 720, "480p": 480, "360p": 360}
-        max_h = height_map.get(request.quality or "1080p", 1080)
-
-        # Compatible MP4 video & M4A audio, fallback to best within resolution
-        opts['format'] = (
-            f"bestvideo[height<={max_h}][ext=mp4]+bestaudio[ext=m4a]/"
-            f"bestvideo[height<={max_h}]+bestaudio/"
-            f"best[height<={max_h}][ext=mp4]/"
-            f"best[height<={max_h}]/best"
-        )
+        # The same rule /api/info used to offer and price this quality
+        # (app/services/formats.py): highest resolution within the cap, H.264
+        # + AAC at that resolution.
+        opts['format'] = video_format_spec(request.quality)
+        opts['format_sort'] = VIDEO_FORMAT_SORT
         opts['merge_output_format'] = 'mp4'
 
         postprocessors = []

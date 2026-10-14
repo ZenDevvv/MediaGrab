@@ -293,7 +293,7 @@
           <div class="head2">
             <div class="badge good"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><use href="#i-check"/></svg></div>
             <h2>Got it.</h2>
-            <p>Your clip is ready. Save it before it clears out.</p>
+            <p id="ready-lede">Your clip is ready. Save it before it clears out.</p>
           </div>
 
           <div class="files">
@@ -417,7 +417,7 @@
         <svg class="ico" viewBox="0 0 24 24"><use href="#i-back"/></svg>
       </button>
     </div>
-    <p class="mono">Saved in this browser · Server clears files after 30 min</p>
+    <p class="mono" id="retention-drawer-note">Saved in this browser · Server clears files after 60s</p>
 
     <div id="drawer-history-list" class="file-cards" style="flex: 1; overflow-y: auto;">
       <!-- Populated from localStorage -->

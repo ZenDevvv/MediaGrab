@@ -8,7 +8,6 @@ import com.yausername.youtubedl_android.YoutubeDLRequest
 import dev.mediagrab.contract.DownloadRequest
 import dev.mediagrab.contract.InfoResponse
 import dev.mediagrab.contract.JobProgressResponse
-import dev.mediagrab.contract.QualityOption
 import dev.mediagrab.contract.SubtitleOption
 import dev.mediagrab.storage.DownloadsPublisher
 import kotlinx.coroutines.Dispatchers
@@ -25,7 +24,6 @@ import kotlinx.serialization.json.jsonPrimitive
 import java.io.File
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
-import kotlin.math.abs
 
 /**
  * The real engine: `youtubedl-android`, which embeds a Python interpreter and
@@ -183,7 +181,8 @@ class YoutubeDlEngine(
                     addOption("--convert-subs", "srt")
                 }
                 else -> {
-                    addOption("-f", formatSelector(job.download.quality))
+                    addOption("-f", videoFormatSpec(job.download.quality))
+                    addOption("-S", VIDEO_FORMAT_SORT)
                     addOption("--merge-output-format", "mp4")
                     job.download.subtitles?.takeIf { it.embed }?.let { subs ->
                         addOption("--write-subs")
@@ -264,19 +263,6 @@ class YoutubeDlEngine(
             ?.filter { it.isFile && !it.name.startsWith(".") && !it.name.endsWith(".part") }
             ?.maxByOrNull { it.length() }
 
-    /**
-     * Desktop's chain (app/services/downloader.py): H.264 MP4 + M4A first, so
-     * the result remuxes and plays everywhere, and only then anything within
-     * the height. The bare bestvideo+bestaudio it replaces picked AV1 + Opus
-     * on the first emulator run, which many phone players will not open.
-     */
-    private fun formatSelector(quality: String?): String {
-        val h = quality?.removeSuffix("p")?.toIntOrNull() ?: 1080
-        return "bestvideo[height<=$h][ext=mp4]+bestaudio[ext=m4a]/" +
-            "bestvideo[height<=$h]+bestaudio/" +
-            "best[height<=$h][ext=mp4]/" +
-            "best[height<=$h]/best"
-    }
 
     override fun progress(jobId: String): JobProgressResponse? =
         jobs[jobId]?.let { job ->
@@ -378,9 +364,6 @@ class YoutubeDlEngine(
 private val TERMINAL = setOf("ready", "error", "cancelled")
 private const val TAG = "MediaGrab"
 
-/** Resolutions offered in the chooser. */
-private val STANDARD = listOf(240, 360, 480, 720, 1080, 1440, 2160)
-
 /** Same rendering as desktop's `format_size`, which the ready card displays. */
 internal fun formatSize(bytes: Long): String {
     if (bytes <= 0) return "-- MB"
@@ -412,33 +395,6 @@ internal fun parseMetadata(raw: String, url: String): InfoResponse {
     }
     val audioCodec = bestAudio?.get("acodec")?.jsonPrimitive?.content.orEmpty().lowercase()
 
-    val byResolution = LinkedHashMap<Int, QualityOption>()
-    for (format in root["formats"]?.jsonArray.orEmpty().map { it.jsonObject }) {
-        val height = format["height"]?.jsonPrimitive?.intOrNull ?: continue
-        if (height < 240) continue
-        val closest = STANDARD.minByOrNull { abs(it - height) } ?: continue
-        // Within 15% of a standard rung, or it is a source cut that has no
-        // meaning as a "resolution" to pick.
-        if (abs(closest - height) > closest * 0.15) continue
-
-        val vcodec = format["vcodec"]?.jsonPrimitive?.content.orEmpty().lowercase()
-        val ext = format["ext"]?.jsonPrimitive?.content.orEmpty().lowercase()
-        val size = format["filesize"]?.jsonPrimitive?.longOrNullSafe()
-            ?: format["filesize_approx"]?.jsonPrimitive?.longOrNullSafe()
-            ?: 0L
-
-        val remux = ("avc1" in vcodec || "h264" in vcodec || ext == "mp4") && closest <= 1080
-
-        val existing = byResolution[closest]
-        if (existing == null || size > existing.approxBytes) {
-            byResolution[closest] = QualityOption(
-                resolution = "${closest}p",
-                approxBytes = size,
-                type = if (remux) "remux" else "encode",
-            )
-        }
-    }
-
     val subtitles = root["subtitles"]?.jsonObject.orEmpty()
         .plus(root["automatic_captions"]?.jsonObject.orEmpty())
         .map { (lang, entries) ->
@@ -465,7 +421,7 @@ internal fun parseMetadata(raw: String, url: String): InfoResponse {
             audioCodec.isNotEmpty() -> audioCodec
             else -> "opus"
         },
-        qualities = byResolution.entries.sortedByDescending { it.key }.map { it.value },
+        qualities = offeredQualities(root),
         subtitles = subtitles,
     )
 }

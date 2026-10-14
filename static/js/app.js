@@ -211,6 +211,11 @@
     return (bytes / Math.pow(1024, i)).toFixed(i > 1 ? 1 : 0) + ' ' + units[i];
   }
 
+  // A quality whose size the source does not report says so, not "0 B".
+  function chipSize(bytes) {
+    return bytes > 0 ? formatBytes(bytes) : 'size unknown';
+  }
+
   // --- Navigation & Router ---
   function showScreen(screenId) {
     ALL_SCREENS.forEach((key) => {
@@ -657,7 +662,7 @@
       const baseBytes = parseInt(chip.dataset.baseBytes || '0', 10);
       const estBytes = Math.round(baseBytes * ratio);
       const sizeEl = chip.querySelector('i');
-      if (sizeEl) sizeEl.textContent = formatBytes(estBytes);
+      if (sizeEl) sizeEl.textContent = chipSize(estBytes);
     });
 
     // Update audio rows
@@ -844,10 +849,12 @@
     // Populate Video Qualities
     const qualitiesGrid = $('#video-qualities-grid');
     qualitiesGrid.innerHTML = '';
+    // The server lists only qualities the source really has, priced as the
+    // file that will download. With nothing to list, offer the source as is
+    // rather than invent resolutions and sizes (a 240p video used to show a
+    // made-up 1080p at 51.5 MB).
     const qualities = data.qualities && data.qualities.length ? data.qualities : [
-      { resolution: '1080p', approx_bytes: 50000000, type: 'remux' },
-      { resolution: '720p', approx_bytes: 25000000, type: 'remux' },
-      { resolution: '480p', approx_bytes: 12000000, type: 'remux' }
+      { resolution: 'Original', approx_bytes: 0, type: 'remux' }
     ];
 
     qualities.forEach((q, idx) => {
@@ -858,7 +865,7 @@
       chip.dataset.baseBytes = q.approx_bytes || 0;
       chip.innerHTML = `
         <b>${q.resolution}</b>
-        <i>${formatBytes(q.approx_bytes)}</i>
+        <i>${chipSize(q.approx_bytes)}</i>
         <span class="tag ${q.type === 'remux' ? 'fast' : 'slow'}">${q.type}</span>
         ${locked ? '<span class="tag locked-tag">Desktop/Android only</span>' : ''}
       `;
@@ -1068,15 +1075,18 @@
     const label = formatRetention(AppState.retentionSeconds);
     const side = $('#retention-side-label');
     const drawer = $('#retention-drawer-note');
+    const lede = $('#ready-lede');
     if (isHostedMode()) {
       if (side) side.textContent = `Auto-deletes ${label} after save`;
       if (drawer) drawer.textContent = `Saved in this browser · Server copy deleted ${label} after you save`;
+      if (lede) lede.textContent = 'Your clip is ready. Save it before it clears out.';
     } else {
       // Desktop writes straight to the user's own Downloads folder. There is no
       // server copy and nothing is ever swept, so claiming a countdown here
       // would describe a retention policy that does not exist.
       if (side) side.textContent = 'Saved to your Downloads';
       if (drawer) drawer.textContent = 'Saved in this browser · Files stay in your Downloads folder';
+      if (lede) lede.textContent = 'Your clip is ready. It is in your Downloads folder.';
     }
   }
 

@@ -1,6 +1,9 @@
 package dev.mediagrab
 
+import dev.mediagrab.engine.VIDEO_FORMAT_SORT
 import dev.mediagrab.engine.parseMetadata
+import dev.mediagrab.engine.videoFormatSpec
+import java.io.File
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -18,31 +21,8 @@ import org.junit.Test
  */
 class MetadataMappingTest {
 
-    private val payload = """
-    {
-      "title": "Big Buck Bunny",
-      "uploader": "Blender",
-      "channel": "Blender",
-      "duration": 596,
-      "thumbnail": "https://i.example.invalid/hq.jpg",
-      "subtitles": { "en": [{"ext": "vtt"}] },
-      "automatic_captions": { "fr": [{"ext": "vtt"}] },
-      "formats": [
-        {"height": 1080, "vcodec": "avc1.640028", "acodec": "none", "ext": "mp4",
-         "filesize": 120000000, "abr": 128.0, "tbr": 3000.0},
-        {"height": 1080, "vcodec": "avc1.640028", "acodec": "mp4a.40.2", "ext": "mp4",
-         "filesize": 150000000, "abr": 192.0, "tbr": 3200.0},
-        {"height": 720, "vcodec": "avc1.4d401f", "acodec": "mp4a.40.2", "ext": "mp4",
-         "filesize": 50000000, "abr": 128.0, "tbr": 1500.0},
-        {"height": 360, "vcodec": "vp9", "acodec": "none", "ext": "webm",
-         "filesize": 8000000, "abr": 96.0},
-        {"height": 144, "vcodec": "avc1", "acodec": "none", "ext": "mp4",
-         "filesize": 500000, "abr": 64.0},
-        {"vcodec": "none", "acodec": "opus", "abr": 160.0},
-        {"vcodec": "none", "acodec": "mp4a.40.2", "abr": 128.0}
-      ]
-    }
-    """.trimIndent()
+    /** Shared with tests/test_formats.py, which asserts the same qualities. */
+    private val payload = File(System.getProperty("mediagrab.fixtures"), "formats-mixed.json").readText()
 
     @Test
     fun `maps the scalar fields`() {
@@ -55,19 +35,44 @@ class MetadataMappingTest {
     }
 
     @Test
-    fun `keeps only resolutions close to a standard rung`() {
-        // 144 is below the 240 floor and must not appear; the chooser has no
-        // rung for it and offering it produces a selection that cannot be
-        // satisfied.
-        val resolutions = parseMetadata(payload, "u").qualities.map { it.resolution }
-        assertEquals(listOf("1080p", "720p", "360p"), resolutions)
+    fun `offers what the download rule actually fetches`() {
+        // Same expectation as MIXED_EXPECTED in tests/test_formats.py, where
+        // yt-dlp's real selector runs over this file. 1080p is the H.264
+        // video-only stream plus AAC, not the larger muxed file; a 720p
+        // request would get the 360p stream, so 720p is not offered at all.
+        val offered = parseMetadata(payload, "u").qualities
+            .map { Triple(it.resolution, it.approxBytes, it.type) }
+        assertEquals(
+            listOf(
+                Triple("1080p", 120_000_000L + 9_536_000L, "remux"),
+                Triple("360p", 8_000_000L + 9_536_000L, "encode"),
+                Triple("144p", 500_000L + 9_536_000L, "remux"),
+            ),
+            offered,
+        )
     }
 
     @Test
-    fun `keeps the largest file when a resolution appears twice`() {
-        val info = parseMetadata(payload, "u")
-        val hd = info.qualities.first { it.resolution == "1080p" }
-        assertEquals(150_000_000L, hd.approxBytes)
+    fun `a low resolution source offers only what exists`() {
+        // "Me at the zoo": nothing above 240p, and AV1 inside .mp4 beside H.264.
+        val zoo = """
+        {"duration": 19, "formats": [
+          {"format_id": "140", "vcodec": "none", "acodec": "mp4a.40.2", "ext": "m4a", "filesize": 309288, "abr": 129},
+          {"format_id": "251", "vcodec": "none", "acodec": "opus", "ext": "webm", "filesize": 252182, "abr": 106},
+          {"format_id": "160", "height": 144, "vcodec": "avc1.4D400B", "acodec": "none", "ext": "mp4", "filesize": 195278},
+          {"format_id": "133", "height": 240, "vcodec": "avc1.4D400C", "acodec": "none", "ext": "mp4", "filesize": 433081},
+          {"format_id": "395", "height": 240, "vcodec": "av01.0.00M.08", "acodec": "none", "ext": "mp4", "filesize": 223779}
+        ]}
+        """.trimIndent()
+        val offered = parseMetadata(zoo, "u").qualities
+        assertEquals(listOf("240p", "144p"), offered.map { it.resolution })
+        assertEquals(433_081L + 309_288L, offered.first().approxBytes)
+    }
+
+    @Test
+    fun `the download asks yt-dlp for the same rule`() {
+        assertEquals("bv[height<=720]+ba/b[height<=720][ext=mp4]/b[height<=720]/b", videoFormatSpec("720p"))
+        assertEquals("res,vcodec:h264,acodec:aac", VIDEO_FORMAT_SORT)
     }
 
     @Test

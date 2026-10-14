@@ -1,6 +1,10 @@
 fastapi>=0.115.0
 uvicorn[standard]>=0.30.0
-yt-dlp>=2025.01.0
+# Pinned, and to the same release as android/ytdlp.lock (a test enforces it).
+# An unpinned yt-dlp meant every build shipped whatever was newest that day,
+# so two builds of one commit could behave differently on the same video.
+# Bump both together; old releases stop working on YouTube within months.
+yt-dlp==2026.08.19
 pydantic>=2.8.0
 pytest>=8.0.0
 pytest-asyncio>=0.23.0

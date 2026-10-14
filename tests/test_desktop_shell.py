@@ -615,22 +615,35 @@ def test_promo_strip_does_not_force_download_attr_on_page_link():
     assert "removeAttribute('download')" in js
 
 
-def test_retention_copy_is_not_hardcoded():
+@pytest.mark.parametrize("page", ["index.html", "choose.html"])
+def test_retention_copy_is_not_hardcoded(page):
     """Regression: hosted retention is 60s, but the UI said "Cleared after 30 min".
 
     A visitor was told files survive 30 minutes on a server that deletes them 60
-    seconds after retrieval.
+    seconds after retrieval. The first fix covered index.html only, so the
+    history drawer on the choose page kept saying "30 min" on both hosted and
+    desktop (where nothing is deleted at all).
     """
     js = Path("static/js/app.js").read_text(encoding="utf-8")
-    html = Path("static/index.html").read_text(encoding="utf-8")
+    html = Path(f"static/{page}").read_text(encoding="utf-8")
 
     assert "Cleared after 30 min" not in html, "Retention copy is hardcoded and stale"
-    assert "Server clears files after 30 min" not in html
+    assert "30 min" not in html
     assert "renderRetentionCopy" in js
     assert "AppState.retentionSeconds" in js
     # The labels must exist for the script to populate.
-    assert 'id="retention-side-label"' in html
     assert 'id="retention-drawer-note"' in html
+    if page == "index.html":
+        assert 'id="retention-side-label"' in html
+
+
+def test_desktop_ready_screen_does_not_threaten_deletion():
+    """Desktop never deletes, so "Save it before it clears out" was untrue there."""
+    js = Path("static/js/app.js").read_text(encoding="utf-8")
+    html = Path("static/choose.html").read_text(encoding="utf-8")
+    assert 'id="ready-lede"' in html
+    assert "$('#ready-lede')" in js
+    assert "It is in your Downloads folder." in js
 
 
 def test_tunnel_unit_is_committed_and_loopback_only():

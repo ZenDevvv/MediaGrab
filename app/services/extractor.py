@@ -2,6 +2,7 @@ import asyncio
 from typing import Dict, Any, List
 import yt_dlp
 from app.api.schemas import InfoResponse, QualityOption, SubtitleOption
+from app.services.formats import offered_qualities
 from app.services.youtube_circuit import is_youtube_url
 from app.services.ytdlp_opts import base_ytdl_opts
 
@@ -78,31 +79,13 @@ def _to_number(value: Any, default: float = 0.0) -> float:
         return default
 
 
-def parse_metadata(info: Dict[str, Any], url: str) -> InfoResponse:
-    title = info.get('title') or 'Untitled'
-    uploader = info.get('uploader') or info.get('channel') or 'Unknown'
-    duration = int(info.get('duration') or 0)
-    thumbnail = info.get('thumbnail')
+def _estimated_qualities(formats: List[Dict[str, Any]], duration: int) -> List[QualityOption]:
+    """Per-resolution estimate from the raw format list, without yt-dlp's selector.
 
-    formats = info.get('formats') or []
-
-    # Detect audio stream characteristics
-    audio_formats = [f for f in formats if f.get('vcodec') == 'none' and f.get('acodec') != 'none']
-    source_audio_kbps = 128
-    source_audio_codec = "Opus"
-    if audio_formats:
-        # Sort by audio bitrate or quality
-        best_audio = max(audio_formats, key=lambda f: f.get('abr') or f.get('tbr') or 0)
-        source_audio_kbps = int(best_audio.get('abr') or best_audio.get('tbr') or 128)
-        acodec = best_audio.get('acodec', '')
-        if 'opus' in acodec.lower():
-            source_audio_codec = 'Opus'
-        elif 'mp4a' in acodec.lower() or 'aac' in acodec.lower():
-            source_audio_codec = 'AAC'
-        elif acodec:
-            source_audio_codec = acodec
-
-    # Build quality map for video
+    Only the fallback for when selection fails (formats.offered_qualities is
+    the real answer): it buckets by nearest standard height and prices the
+    largest format in each, which can overstate what will download.
+    """
     res_map: Dict[int, Dict[str, Any]] = {}
     for f in formats:
         height = int(_to_number(f.get('height'), 0))
@@ -139,14 +122,44 @@ def parse_metadata(info: Dict[str, Any], url: str) -> InfoResponse:
             type=res_map[r]['type']
         ))
 
-    # Fallback default qualities if none probed
-    if not qualities:
-        for r in [1080, 720, 480]:
-            qualities.append(QualityOption(
-                resolution=f"{r}p",
-                approx_bytes=int(r * 50000),
-                type="remux" if r <= 1080 else "encode"
-            ))
+    return qualities
+
+
+def parse_metadata(info: Dict[str, Any], url: str) -> InfoResponse:
+    title = info.get('title') or 'Untitled'
+    uploader = info.get('uploader') or info.get('channel') or 'Unknown'
+    duration = int(info.get('duration') or 0)
+    thumbnail = info.get('thumbnail')
+
+    formats = info.get('formats') or []
+
+    # Detect audio stream characteristics
+    audio_formats = [f for f in formats if f.get('vcodec') == 'none' and f.get('acodec') != 'none']
+    source_audio_kbps = 128
+    source_audio_codec = "Opus"
+    if audio_formats:
+        # Sort by audio bitrate or quality
+        best_audio = max(audio_formats, key=lambda f: f.get('abr') or f.get('tbr') or 0)
+        source_audio_kbps = int(best_audio.get('abr') or best_audio.get('tbr') or 128)
+        acodec = best_audio.get('acodec', '')
+        if 'opus' in acodec.lower():
+            source_audio_codec = 'Opus'
+        elif 'mp4a' in acodec.lower() or 'aac' in acodec.lower():
+            source_audio_codec = 'AAC'
+        elif acodec:
+            source_audio_codec = acodec
+
+    qualities: List[QualityOption] = []
+    try:
+        qualities = [
+            QualityOption(resolution=r, approx_bytes=b, type=t)
+            for r, b, t in offered_qualities(info)
+        ]
+    except Exception as e:
+        # Selection runs yt-dlp internals over extractor output; a surprise
+        # there must cost the precise list, not the whole inspect.
+        print(f"[MediaGrab] quality selection failed, using estimates: {type(e).__name__}: {e}")
+        qualities = _estimated_qualities(formats, duration)
 
     # Subtitles extraction
     subtitles: List[SubtitleOption] = []
