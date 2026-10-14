@@ -16,6 +16,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import java.io.File
+import java.security.SecureRandom
 
 /**
  * Owns the embedded backend for the life of the process.
@@ -44,6 +45,13 @@ class MediaGrabApp : Application() {
         }
     }
 
+    /**
+     * Gates the API to this app's own WebView (ApiServer.requireToken). New
+     * each process, never persisted or logged.
+     */
+    val accessToken: String = ByteArray(32).also { SecureRandom().nextBytes(it) }
+        .joinToString("") { "%02x".format(it) }
+
     /** The base URL the WebView should load, once the server is listening. */
     val backend: Deferred<String> by lazy { scope.async { startBackend() } }
 
@@ -62,6 +70,7 @@ class MediaGrabApp : Application() {
             ApkAssets { path -> assets.open("web/$path") },
             version = packageManager.getPackageInfo(packageName, 0).versionName ?: "dev",
             revealDownloads = ::revealDownloads,
+            accessToken = accessToken,
         )
         // Fixed, because the port is part of the page origin: an ephemeral one
         // would be a new origin each launch and empty localStorage (theme,

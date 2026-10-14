@@ -16,6 +16,7 @@ import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
 import io.ktor.server.application.Application
 import io.ktor.server.application.ApplicationCall
+import io.ktor.server.application.createApplicationPlugin
 import io.ktor.server.application.install
 import io.ktor.server.cio.CIO
 import io.ktor.server.engine.EmbeddedServer
@@ -59,8 +60,14 @@ class ApiServer(
      * could be opened.
      */
     private val revealDownloads: () -> Boolean = { false },
+    /**
+     * When set, every `/api/` request must carry it in the [TOKEN_COOKIE]
+     * cookie. Null in the tests, which exercise the API directly.
+     */
+    private val accessToken: String? = null,
 ) {
     fun module(): Application.() -> Unit = {
+        accessToken?.let { requireToken(it) }
         install(ContentNegotiation) {
             // explicitNulls + encodeDefaults mirror FastAPI's Pydantic output:
             // an absent optional is emitted as null rather than omitted, so the
@@ -211,6 +218,39 @@ private fun Route.installApiRoutes(
 }
 
 private val TERMINAL_STATUSES = setOf("ready", "error", "cancelled")
+
+/** The cookie the WebView carries; see [requireToken]. */
+const val TOKEN_COOKIE = "mg_token"
+
+/**
+ * Loopback is not private on Android: any installed app with INTERNET can
+ * connect to 127.0.0.1, and without this could start downloads into the
+ * user's Downloads or read back the files they downloaded through /api/file.
+ *
+ * The app puts a per-launch random token into its own WebView as an HttpOnly
+ * cookie; same-origin fetch and EventSource send it unprompted, so app.js
+ * needs no change. Other apps cannot read the WebView's cookies, and a page
+ * in the phone's browser has a separate cookie jar. Only /api/ is gated: the
+ * static frontend is public anyway, and the page must load to get the cookie
+ * set before its first API call.
+ */
+private fun Application.requireToken(token: String) {
+    val expected = token.toByteArray()
+    install(
+        createApplicationPlugin("ApiToken") {
+            onCall { call ->
+                if (!call.request.local.uri.startsWith("/api/")) return@onCall
+                val presented = call.request.cookies[TOKEN_COOKIE]?.toByteArray()
+                // Constant-time, so the comparison leaks nothing about how
+                // much of a guess was right. Responding here marks the call
+                // handled, so routing never reaches the endpoint.
+                if (presented == null || !java.security.MessageDigest.isEqual(presented, expected)) {
+                    call.respondError(HttpStatusCode.Forbidden, "Not allowed")
+                }
+            }
+        }
+    )
+}
 
 /**
  * One SSE frame, shaped exactly as `api_events` in app/api/routes.py emits it:

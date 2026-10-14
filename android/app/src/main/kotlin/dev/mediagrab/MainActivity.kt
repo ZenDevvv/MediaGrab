@@ -10,6 +10,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
+import android.webkit.CookieManager
 import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -18,6 +19,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
+import dev.mediagrab.server.TOKEN_COOKIE
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
@@ -76,6 +78,7 @@ class MainActivity : AppCompatActivity() {
                 webView.loadData(FAILED_PAGE, "text/html", "utf-8")
                 return@launch
             }
+            authorise(url)
             webView.loadUrl(pageFor(url, intent))
         }
     }
@@ -93,6 +96,18 @@ class MainActivity : AppCompatActivity() {
             val base = runCatching { (application as MediaGrabApp).backend.await() }.getOrNull()
                 ?: return@launch
             webView.loadUrl(pageFor(base, intent))
+        }
+    }
+
+    /**
+     * Hand the WebView the API token before it loads anything that calls the
+     * API. HttpOnly: page script never needs to read it, only send it.
+     */
+    private fun authorise(base: String) {
+        val token = (application as MediaGrabApp).accessToken
+        CookieManager.getInstance().apply {
+            setCookie(base, "$TOKEN_COOKIE=$token; Path=/; HttpOnly; SameSite=Strict")
+            flush()
         }
     }
 
