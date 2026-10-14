@@ -38,7 +38,7 @@ class MediaGrabApp : Application() {
             it.onActivityChanged = {
                 // Only ever *starts* the service: it stops itself once the
                 // engine reports nothing active, so no stop races a new job.
-                if (it.activeCount() > 0) DownloadService.start(this)
+                if (it.activeCount() > 0) startDownloadService()
             }
         }
     }
@@ -66,6 +66,23 @@ class MediaGrabApp : Application() {
         val port = server.engine.resolvedConnectors().first().port
         Log.i(TAG, "backend listening on 127.0.0.1:$port")
         return "http://127.0.0.1:$port/"
+    }
+
+    /**
+     * Best effort. Android 12+ refuses a foreground-service start while the app
+     * is in the background, and that refusal used to escape through submit():
+     * the request answered 500 while the job it had already queued ran on and
+     * saved a file the client had been told failed. Found on the emulator. The
+     * download matters more than the notification, so a refusal is logged and
+     * the job proceeds -- it just loses protection from being killed.
+     */
+    private fun startDownloadService() {
+        try {
+            DownloadService.start(this)
+        } catch (e: IllegalStateException) {
+            // ForegroundServiceStartNotAllowedException is a subclass.
+            Log.w(TAG, "download service not started; continuing without it", e)
+        }
     }
 
     /** The system Downloads app, as desktop opens its file manager. */

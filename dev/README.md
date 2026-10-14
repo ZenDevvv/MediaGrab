@@ -30,7 +30,7 @@ Runs an Android tool with everything it writes kept under `.toolchain/`:
 
 ```bash
 dev/android-sandbox.sh adb devices
-dev/android-sandbox.sh emulator -avd mediagrab -no-window -gpu guest
+dev/android-sandbox.sh emulator -avd mediagrab -no-window -gpu swangle_indirect
 ```
 
 `env.sh` covers the variables the SDK documents, but adb writes its key pair
@@ -41,8 +41,13 @@ for the whole shell. Use it for every `adb`, `emulator`, `avdmanager` and
 
 The `mediagrab` AVD is an x86_64 API 34 image. Debug APKs carry x86_64 natives
 for it; see `android/app/build.gradle.kts` for why ARM translation is not
-enough. Use `-gpu guest`: `swiftshader_indirect` segfaulted the emulator
-mid-session.
+enough.
+
+Use `-gpu swangle_indirect`. Both `swiftshader_indirect` and `guest` segfault
+the headless emulator under steady redraw -- the download screen, the progress
+notification, or a DevTools `Page.captureScreenshot` mid-animation -- each time
+leaving a ~1 GB core with systemd-coredump. For screenshots, prefer
+`adb exec-out screencap -p` at a resting screen.
 
 ## `sync-contract.py`
 

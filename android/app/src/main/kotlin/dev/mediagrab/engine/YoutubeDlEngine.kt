@@ -73,7 +73,11 @@ class YoutubeDlEngine(
     suspend fun initialise() = withContext(Dispatchers.IO) {
         YoutubeDL.getInstance().init(appContext)
         FFmpeg.getInstance().init(appContext)
-        if (!downloadDir.exists()) downloadDir.mkdirs()
+        // No job outlives its process, so anything already in staging is left
+        // over from one that was killed mid-download. Nothing else would ever
+        // remove it.
+        downloadDir.deleteRecursively()
+        downloadDir.mkdirs()
     }
 
     override suspend fun inspect(url: String): InfoResponse = withContext(Dispatchers.IO) {
@@ -176,8 +180,11 @@ class YoutubeDlEngine(
         }
 
         job.status = "downloading"
-        val response = YoutubeDL.getInstance().execute(request, job.id) { fraction, _, _ ->
-            job.progress = (fraction * 100).toInt().coerceIn(0, 100)
+        // The callback's first argument is a percentage -- the library parses
+        // yt-dlp's "37.5%" -- not a fraction. Multiplying it by 100 pinned the
+        // bar at 100% from the first tick; found on the emulator.
+        val response = YoutubeDL.getInstance().execute(request, job.id) { percent, _, _ ->
+            job.progress = percent.toInt().coerceIn(0, 100)
         }
 
         if (job.status == "cancelled") return
