@@ -2236,7 +2236,12 @@
     const urlParams = new URLSearchParams(window.location.search);
     const queryUrl = urlParams.get('url');
 
-    if (meta) {
+    // An explicit ?url= wins over the session's last grab: the Android app
+    // opens /choose?url=... for a link shared into it, and the stored metadata
+    // then belongs to the previous video. Same URL means a reload; reuse it.
+    if (queryUrl && queryUrl !== url) {
+      inspectUrl(queryUrl);
+    } else if (meta) {
       AppState.metadata = meta;
       AppState.currentUrl = url || meta.url || '';
       populateChooser(meta);

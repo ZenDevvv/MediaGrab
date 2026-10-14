@@ -76,9 +76,38 @@ class MainActivity : AppCompatActivity() {
                 webView.loadData(FAILED_PAGE, "text/html", "utf-8")
                 return@launch
             }
-            webView.loadUrl(url)
+            webView.loadUrl(pageFor(url, intent))
         }
     }
+
+    /**
+     * A link shared while the app is already open. launchMode="singleTask"
+     * routes the share here instead of stacking a second activity -- and with
+     * it a second WebView -- on top of the first.
+     */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (extractSharedUrl(sharedText(intent)) == null) return
+        lifecycleScope.launch {
+            val base = runCatching { (application as MediaGrabApp).backend.await() }.getOrNull()
+                ?: return@launch
+            webView.loadUrl(pageFor(base, intent))
+        }
+    }
+
+    /**
+     * The landing page, or -- for text shared into the app -- the chooser,
+     * already inspecting the shared link. app.js handles /choose?url= by
+     * running the same inspect the paste box does.
+     */
+    private fun pageFor(base: String, intent: Intent?): String {
+        val shared = extractSharedUrl(sharedText(intent)) ?: return base
+        return "${base}choose?url=${Uri.encode(shared)}"
+    }
+
+    private fun sharedText(intent: Intent?): String? =
+        intent?.takeIf { it.action == Intent.ACTION_SEND }?.getStringExtra(Intent.EXTRA_TEXT)
 
     /**
      * Asked once, up front, rather than at the first download: the request is
