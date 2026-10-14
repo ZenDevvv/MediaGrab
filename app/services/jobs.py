@@ -115,7 +115,9 @@ class JobManager:
         if status is not None:
             job.status = status
         if progress is not None:
-            job.progress = progress
+            # The bar only moves forward: phases report from different places
+            # and a late report from an earlier one must not pull it back.
+            job.progress = max(job.progress or 0.0, progress)
         if speed is not None:
             job.speed = speed
         if eta is not None:

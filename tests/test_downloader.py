@@ -127,7 +127,7 @@ def test_handle_ffmpeg_progress_trim():
     updated = job_manager.get_job(job.id)
     assert updated is not None
     assert updated.status == "downloading"
-    assert updated.progress == 49.0  # (68.5 / 137) * 98.0
+    assert updated.progress == 50.0  # 4 + (68.5 / 137) * (96 - 4)
     assert updated.speed == "2.0x speed"
     assert updated.eta == "0:34"  # (137 - 68.5) / 2.0 = 34.25s
     assert updated.got == "5.0 MB"
@@ -136,7 +136,7 @@ def test_handle_ffmpeg_progress_trim():
     # Test completion packet
     _handle_ffmpeg_progress(job.id, req, {'progress': 'end'})
     final_updated = job_manager.get_job(job.id)
-    assert final_updated.progress == 99.0
+    assert final_updated.progress == 96.0
     assert final_updated.stage == "Finalizing container..."
 
 
@@ -269,3 +269,60 @@ def test_unexpected_job_errors_are_logged_with_a_traceback():
     # user can paste.
     assert "traceback.print_exc()" in source
     assert "JOB {job_id} FAILED" in source
+
+
+# --- one steady progress bar across video + audio ---------------------------
+
+def _hooks_for(job_id):
+    from app.api.schemas import DownloadRequest
+    from app.services.downloader import create_ydl_opts
+
+    opts = create_ydl_opts(job_id, DownloadRequest(url="https://example.com/v", mode="mp4"), None, [])
+    return opts['progress_hooks'][0], opts['postprocessor_hooks'][0]
+
+
+def test_progress_runs_forward_across_video_and_audio_streams():
+    from app.services.jobs import job_manager
+
+    req = DownloadRequest(url="https://example.com/v", mode="mp4")
+    job = job_manager.create_job(req)
+    progress, post = _hooks_for(job.id)
+
+    video = {'format_id': 'v', 'filesize': 90_000_000, 'vcodec': 'avc1', 'acodec': 'none'}
+    audio = {'format_id': 'a', 'filesize': 10_000_000, 'vcodec': 'none', 'acodec': 'mp4a'}
+    info = {'requested_formats': [video, audio], **video}
+    audio_info = {'requested_formats': [video, audio], **audio}
+
+    seen = []
+
+    def feed(hook, d):
+        hook(d)
+        seen.append(job_manager.get_job(job.id).progress)
+
+    for done in (0, 30_000_000, 60_000_000, 90_000_000):
+        feed(progress, {'status': 'downloading', 'downloaded_bytes': done, 'total_bytes': 90_000_000, 'info_dict': info})
+    feed(progress, {'status': 'finished', 'downloaded_bytes': 90_000_000, 'total_bytes': 90_000_000, 'info_dict': info})
+    # The first stream finishing must not announce processing or jump the bar.
+    assert job_manager.get_job(job.id).status == "downloading"
+    assert seen[-1] < 80
+
+    for done in (0, 5_000_000, 10_000_000):
+        feed(progress, {'status': 'downloading', 'downloaded_bytes': done, 'total_bytes': 10_000_000, 'info_dict': audio_info})
+    feed(progress, {'status': 'finished', 'downloaded_bytes': 10_000_000, 'total_bytes': 10_000_000, 'info_dict': audio_info})
+    assert job_manager.get_job(job.id).status == "processing"
+    feed(post, {'status': 'started', 'postprocessor': 'Merger'})
+    feed(post, {'status': 'finished', 'postprocessor': 'Merger', 'info_dict': {}})
+
+    assert seen == sorted(seen), seen
+    assert seen[0] >= 4.0
+    assert max(b - a for a, b in zip(seen, seen[1:])) < 40  # no jump to the end
+    assert seen[-1] == 96.0
+
+
+def test_job_progress_never_moves_backward():
+    from app.services.jobs import job_manager
+
+    job = job_manager.create_job(DownloadRequest(url="https://example.com/v", mode="mp4"))
+    job_manager.update_job(job.id, progress=70.0)
+    job_manager.update_job(job.id, progress=40.0)
+    assert job_manager.get_job(job.id).progress == 70.0

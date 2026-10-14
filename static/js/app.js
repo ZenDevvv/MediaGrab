@@ -138,7 +138,7 @@
   const $$ = (selector) => document.querySelectorAll(selector);
 
   // Active view screens
-  const ALL_SCREENS = ['paste', 'choose', 'working', 'ready', 'error', 'offline'];
+  const ALL_SCREENS = ['paste', 'loading', 'choose', 'working', 'ready', 'error', 'offline'];
 
   // --- Helper Utilities ---
   function formatSeconds(sec) {
@@ -225,6 +225,7 @@
       }
     });
     AppState.screen = screenId;
+    if (screenId !== 'working') smoothStop();
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }
 
@@ -478,6 +479,11 @@
     // Update check. Desktop only; a hosted instance is always current.
     const updateGroup = $('#settings-update-group');
     if (updateGroup) updateGroup.hidden = isHostedMode();
+    // The Android app embeds this page; "desktop build" is wrong there.
+    const updateHint = $('#settings-update-hint');
+    if (updateHint && /Android/i.test(navigator.userAgent || '')) {
+      updateHint.textContent = 'Check whether a newer version of the MediaGrab app is available.';
+    }
 
     const btnCheck = $('#btn-check-updates');
     if (btnCheck) {
@@ -1326,6 +1332,7 @@
   }
 
   function resetWorkingScreen() {
+    smoothStart();
     try {
       const livePct = $('#live-pct');
       if (livePct) livePct.innerHTML = '0<small>%</small>';
@@ -1441,26 +1448,83 @@
     });
   }
 
-  function handleProgressUpdate(data) {
-    const rawPct = typeof data.progress === 'number' ? data.progress : 0;
-    const pct = Math.min(100, Math.max(0, Math.round(rawPct)));
+  // --- Smooth progress bar ---
+  // The server reports real progress only while bytes are downloading; reading
+  // the link, merging and saving have no measure. So the bar is drawn from a
+  // shown value that eases toward the latest report and, while a phase with no
+  // reports is running, creeps toward that phase's ceiling. It never moves
+  // backward and never jumps. Bands match app/services/progress.py.
+  const PROGRESS_READ_END = 4;
+  const PROGRESS_PROCESS_END = 96;
+  const PROGRESS_SAVE_END = 99;
+  const Smooth = { shown: 0, target: 0, ceiling: PROGRESS_READ_END, raf: 0, last: 0, finishing: false };
 
+  function smoothRender() {
+    const pct = Math.min(100, Math.max(0, Smooth.shown));
     const track = $('.track');
+    if (track) track.classList.toggle('indeterminate', pct < 0.3);
     const livePct = $('#live-pct');
+    if (livePct) livePct.innerHTML = `${Math.floor(pct)}<small>%</small>`;
     const liveBar = $('#live-bar-fill');
+    if (liveBar) liveBar.style.width = `${pct}%`;
     const liveClipper = $('#live-clipper');
+    if (liveClipper) liveClipper.style.left = `${pct}%`;
+    const bar = $('#view-working .bar-bg');
+    if (bar) bar.setAttribute('aria-valuenow', String(Math.floor(pct)));
+  }
 
-    if (pct > 0) {
-      if (track) track.classList.remove('indeterminate');
-      if (livePct) livePct.innerHTML = `${pct}<small>%</small>`;
-      if (liveBar) liveBar.style.width = `${pct}%`;
-      if (liveClipper) liveClipper.style.left = `${pct}%`;
-    } else {
-      if (track) track.classList.add('indeterminate');
-      if (livePct) livePct.innerHTML = '0<small>%</small>';
-      if (liveBar) liveBar.style.width = '0%';
-      if (liveClipper) liveClipper.style.left = '0%';
+  function smoothTick(now) {
+    const dt = Math.min(0.25, (now - Smooth.last) / 1000);
+    Smooth.last = now;
+    if (Smooth.shown < Smooth.target) {
+      // Close most of the gap within about half a second, never slower than
+      // 6 points a second so a big report is not left crawling.
+      const gap = Smooth.target - Smooth.shown;
+      const rate = Smooth.finishing ? 14 : 5;
+      Smooth.shown += Math.min(gap, Math.max(gap * (1 - Math.exp(-dt * rate)), (Smooth.finishing ? 30 : 6) * dt));
+    } else if (Smooth.shown < Smooth.ceiling) {
+      // Nothing new to report: drift toward the phase ceiling, slowing as it
+      // nears so a long phase never looks finished.
+      Smooth.shown += (Smooth.ceiling - Smooth.shown) * (1 - Math.exp(-dt / 12));
     }
+    smoothRender();
+    Smooth.raf = requestAnimationFrame(smoothTick);
+  }
+
+  function smoothStart() {
+    Smooth.shown = 0;
+    Smooth.target = 0;
+    Smooth.ceiling = PROGRESS_READ_END;
+    Smooth.finishing = false;
+    Smooth.last = performance.now();
+    smoothRender();
+    if (!Smooth.raf) Smooth.raf = requestAnimationFrame(smoothTick);
+  }
+
+  function smoothStop() {
+    if (Smooth.raf) cancelAnimationFrame(Smooth.raf);
+    Smooth.raf = 0;
+  }
+
+  function smoothReport(data) {
+    const reported = typeof data.progress === 'number' ? data.progress : 0;
+    Smooth.target = Math.max(Smooth.target, Math.min(100, reported));
+    const stage = (data.stage || '').toLowerCase();
+    if (data.status === 'downloading') {
+      // Real bytes are arriving; nothing to guess at.
+      Smooth.ceiling = Smooth.target;
+    } else if (stage.includes('saving')) {
+      Smooth.ceiling = PROGRESS_SAVE_END;
+    } else if (data.status === 'processing') {
+      Smooth.ceiling = PROGRESS_PROCESS_END;
+    } else {
+      Smooth.ceiling = Math.max(Smooth.target, PROGRESS_READ_END);
+    }
+    if (!Smooth.raf) smoothStart();
+  }
+
+  function handleProgressUpdate(data) {
+    smoothReport(data);
 
     const liveSpeed = $('#live-speed');
     const liveEta = $('#live-eta');
@@ -1490,7 +1554,28 @@
     }
   }
 
+  // Sweep the bar to 100% before the ready screen replaces it, so a job that
+  // finishes does not snap from wherever the bar was.
   function handleComplete(data) {
+    if (AppState.screen !== 'working' || Smooth.shown >= 99.5) {
+      finishComplete(data);
+      return;
+    }
+    Smooth.target = 100;
+    Smooth.ceiling = 100;
+    Smooth.finishing = true;
+    if (!Smooth.raf) { Smooth.last = performance.now(); Smooth.raf = requestAnimationFrame(smoothTick); }
+    const started = Date.now();
+    const wait = setInterval(() => {
+      if (Smooth.shown >= 99.5 || Date.now() - started > 900) {
+        clearInterval(wait);
+        finishComplete(data);
+      }
+    }, 40);
+  }
+
+  function finishComplete(data) {
+    smoothStop();
     const track = $('.track');
     if (track) track.classList.remove('indeterminate');
     const livePct = $('#live-pct');
@@ -2283,11 +2368,12 @@
     }
   }
 
-  // The static placeholders ("Title", "Channel") read as a finished page.
+  // A link shared into the app shows a spinner screen while yt-dlp reads it,
+  // rather than the chooser's empty placeholders.
   function showInspecting(url) {
-    $('#choose-title').textContent = 'Reading link…';
-    $('#choose-uploader').textContent = url;
-    $('#choose-duration').textContent = '--:--';
+    const el = $('#loading-url');
+    if (el) el.textContent = url;
+    showScreen('loading');
   }
 
   // --- PWA Service Worker & Install Prompt ---

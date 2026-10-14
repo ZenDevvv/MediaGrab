@@ -212,7 +212,8 @@ class YoutubeDlEngine(
             // A cancel must not be overwritten by a late progress line.
             if (job.status == "cancelled") return@execute
             update.status?.let { job.status = it }
-            update.progress?.let { job.progress = it.coerceIn(0, 100) }
+            // Forward only: the bar must never be pulled back by a late line.
+            update.progress?.let { job.progress = maxOf(job.progress, it.coerceIn(0, 100)) }
             update.speed?.let { job.speed = it }
             update.eta?.let { job.eta = it }
             update.got?.let { job.got = it }
@@ -239,9 +240,16 @@ class YoutubeDlEngine(
             return
         }
 
+        job.status = "processing"
         job.stage = "Saving to Downloads"
+        job.progress = maxOf(job.progress, ProgressTracker.PROCESS_END)
         val published = try {
-            publisher.publish(produced)
+            // Copying a large file takes real time; report it across the last
+            // slice of the bar instead of sitting still.
+            publisher.publish(produced) { fraction ->
+                val span = ProgressTracker.SAVE_END - ProgressTracker.PROCESS_END
+                job.progress = maxOf(job.progress, ProgressTracker.PROCESS_END + (fraction * span).toInt())
+            }
         } catch (t: Throwable) {
             job.status = "error"
             job.error = "Could not save to Downloads: ${t.message}"

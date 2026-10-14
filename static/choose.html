@@ -83,7 +83,18 @@
   <main class="main-wrap">
 
     <!-- Screen: Choose Configuration -->
-    <section class="view-screen active" id="view-choose">
+    <!-- Screen: Reading a shared link. Active until the page knows what to
+         show, so a link shared into the app never opens on empty placeholders. -->
+    <section class="view-screen active" id="view-loading">
+      <div class="loading-card" role="status" aria-live="polite">
+        <div class="loading-spinner" aria-hidden="true"></div>
+        <h2 class="loading-title">Reading your link&hellip;</h2>
+        <p class="loading-url" id="loading-url"></p>
+        <p class="loading-hint">This can take a few seconds.</p>
+      </div>
+    </section>
+
+    <section class="view-screen" id="view-choose">
       <div class="split-layout">
         <!-- Left: Media Player & Inline Trim -->
         <div class="dleft">
@@ -465,7 +476,7 @@
 
     <section class="settings-group" id="settings-update-group" hidden>
       <span class="settings-label">Updates</span>
-      <p class="settings-hint">Check whether a newer MediaGrab desktop build exists.</p>
+      <p class="settings-hint" id="settings-update-hint">Check whether a newer MediaGrab desktop build exists.</p>
       <div class="settings-actions">
         <button class="btn btn-sm" id="btn-check-updates" type="button">
           <span>Check for updates</span>

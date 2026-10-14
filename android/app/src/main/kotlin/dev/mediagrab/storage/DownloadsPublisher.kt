@@ -31,15 +31,15 @@ class DownloadsPublisher(context: Context) {
     /** Where a published file ended up. [name] is what the user will see. */
     class Published(val uri: Uri, val name: String, val size: Long)
 
-    fun publish(source: File): Published =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) publishToMediaStore(source)
-        else publishToPublicDirectory(source)
+    fun publish(source: File, onProgress: (Double) -> Unit = {}): Published =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) publishToMediaStore(source, onProgress)
+        else publishToPublicDirectory(source, onProgress)
 
     fun open(uri: Uri): InputStream =
         if (uri.scheme == "file") FileInputStream(File(requireNotNull(uri.path)))
         else requireNotNull(resolver.openInputStream(uri)) { "cannot open $uri" }
 
-    private fun publishToMediaStore(source: File): Published {
+    private fun publishToMediaStore(source: File, onProgress: (Double) -> Unit): Published {
         val collection = MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
         val values = ContentValues().apply {
             put(MediaStore.Downloads.DISPLAY_NAME, source.name)
@@ -54,7 +54,7 @@ class DownloadsPublisher(context: Context) {
         }
         try {
             requireNotNull(resolver.openOutputStream(uri)) { "cannot write $uri" }.use { out ->
-                source.inputStream().use { it.copyTo(out) }
+                source.inputStream().use { copyReporting(it, out, source.length(), onProgress) }
             }
             resolver.update(uri, ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) }, null, null)
         } catch (t: Throwable) {
@@ -71,11 +71,13 @@ class DownloadsPublisher(context: Context) {
     }
 
     @Suppress("DEPRECATION") // The supported path below API 29.
-    private fun publishToPublicDirectory(source: File): Published {
+    private fun publishToPublicDirectory(source: File, onProgress: (Double) -> Unit): Published {
         val dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
         dir.mkdirs()
         val target = uniqueTarget(dir, source.name)
-        source.copyTo(target)
+        source.inputStream().use { input ->
+            target.outputStream().use { copyReporting(input, it, source.length(), onProgress) }
+        }
         // Without a scan the file exists but the Downloads app and galleries
         // do not list it until something else triggers indexing.
         MediaScannerConnection.scanFile(appContext, arrayOf(target.path), arrayOf(mimeTypeFor(target.name)), null)
@@ -97,5 +99,18 @@ internal fun uniqueTarget(dir: File, name: String): File {
         val candidate = File(dir, "$stem ($n)$ext")
         if (!candidate.exists()) return candidate
         n++
+    }
+}
+
+/** [InputStream.copyTo] that reports the fraction copied, for the saving step. */
+internal fun copyReporting(input: InputStream, out: java.io.OutputStream, total: Long, onProgress: (Double) -> Unit) {
+    val buffer = ByteArray(256 * 1024)
+    var copied = 0L
+    while (true) {
+        val n = input.read(buffer)
+        if (n < 0) break
+        out.write(buffer, 0, n)
+        copied += n
+        if (total > 0) onProgress(copied.toDouble() / total)
     }
 }

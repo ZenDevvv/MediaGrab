@@ -25,7 +25,7 @@ class ProgressTrackerTest {
         video(t)
         val u = t.onLine("[download]  37.5% of   67.98MiB at    3.97MiB/s ETA 00:17")!!
         assertEquals("downloading", u.status)
-        assertEquals(31, u.progress) // 37.5 * 0.85, as desktop weights video
+        assertEquals(31, u.progress) // 4 + 0.375 * 0.85 * 84: video is 85% of the 4..88 download slice
         assertEquals("4.0 MB/s", u.speed)
         assertEquals("0:17", u.eta)
         assertEquals("25 MB / 68 MB", u.got)
@@ -42,20 +42,20 @@ class ProgressTrackerTest {
         t.onLine("[download] Destination: /x/Big Buck Bunny.f140.m4a")
         val startOfAudio = t.onLine("[download]   0.0% of    9.80MiB at  Unknown B/s ETA Unknown")!!
         assertTrue("$endOfVideo then ${startOfAudio.progress}", startOfAudio.progress!! >= endOfVideo)
-        assertEquals(85, startOfAudio.progress)
+        assertEquals(75, startOfAudio.progress)
         assertEquals("Downloading audio payload", startOfAudio.stage)
         // Unknown speed and ETA render as desktop's placeholders.
         assertEquals("-- MB/s", startOfAudio.speed)
         assertEquals("--:--", startOfAudio.eta)
-        assertEquals(98, t.onLine("[download] 100% of    9.80MiB in 00:00:02 at 4.1MiB/s")!!.progress)
+        assertEquals(88, t.onLine("[download] 100% of    9.80MiB in 00:00:02 at 4.1MiB/s")!!.progress)
     }
 
     @Test
-    fun `a single stream is weighted to 95`() {
+    fun `a single stream fills the download slice`() {
         val t = ProgressTracker()
         t.onLine("[info] x: Downloading 1 format(s): 140")
         t.onLine("[download] Destination: /x/a.m4a")
-        assertEquals(95, t.onLine("[download] 100% of    9.80MiB in 00:00:02 at 4.1MiB/s")!!.progress)
+        assertEquals(88, t.onLine("[download] 100% of    9.80MiB in 00:00:02 at 4.1MiB/s")!!.progress)
         assertEquals("Downloading stream payload",
             t.onLine("[download]  50.0% of ~   9.80MiB at  512.00KiB/s ETA 00:10")!!.stage)
     }
@@ -65,10 +65,12 @@ class ProgressTrackerTest {
         val t = ProgressTracker()
         val merge = t.onLine("[Merger] Merging formats into \"/x/Big Buck Bunny.mp4\"")!!
         assertEquals("processing", merge.status)
-        assertEquals(99, merge.progress)
+        assertEquals(90, merge.progress)
         assertEquals("Remuxing video & audio...", merge.stage)
         assertEquals("Converting audio to MP3...", t.onLine("[ExtractAudio] Destination: /x/a.mp3")!!.stage)
-        assertEquals("Embedding tags & artwork...", t.onLine("[EmbedThumbnail] ffmpeg: Adding thumbnail")!!.stage)
+        val tags = t.onLine("[EmbedThumbnail] ffmpeg: Adding thumbnail")!!
+        assertEquals("Embedding tags & artwork...", tags.stage)
+        assertTrue(tags.progress!! > merge.progress!!)
     }
 
     @Test

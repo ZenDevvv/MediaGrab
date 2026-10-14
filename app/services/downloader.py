@@ -11,6 +11,10 @@ from app.api.schemas import DownloadRequest
 from app.config import DOWNLOADS_DIR
 from app.services.formats import VIDEO_FORMAT_SORT, video_format_spec
 from app.services.jobs import job_manager
+from app.services.progress import (
+    DOWNLOAD_END, PROCESS_END, PROCESS_START, READ_END, SAVE_END, TAGS_AT,
+    VIDEO_SHARE, download_pct,
+)
 from app.services.youtube_circuit import circuit as youtube_circuit, is_youtube_url
 from app.services.extractor import is_upstream_refusal
 from app.services.ytdlp_opts import base_ytdl_opts
@@ -96,8 +100,8 @@ def _handle_ffmpeg_progress(
 
     if request.trim and request.trim.end > request.trim.start:
         clip_duration = float(request.trim.end - request.trim.start)
-        pct = (out_time_s / clip_duration * 98.0) if clip_duration > 0 else 0.0
-        pct = min(98.0, max(0.5, pct))
+        fraction = (out_time_s / clip_duration) if clip_duration > 0 else 0.0
+        pct = min(PROCESS_END, max(READ_END, READ_END + fraction * (PROCESS_END - READ_END)))
 
         if speed_float and speed_float > 0.05:
             rem_s = max(0.0, clip_duration - out_time_s)
@@ -115,13 +119,13 @@ def _handle_ffmpeg_progress(
         stage_disp = f"Trimming segment ({curr_fmt} / {tot_fmt})"
 
         if progress_status == 'end':
-            pct = 99.0
+            pct = PROCESS_END
             eta_disp = "0:00"
             stage_disp = "Finalizing container..."
 
         job_manager.update_job(
             job_id,
-            status="downloading" if pct < 99.0 else "processing",
+            status="downloading" if pct < PROCESS_END else "processing",
             progress=round(pct, 1),
             speed=speed_disp,
             eta=eta_disp,
@@ -137,7 +141,8 @@ def _handle_ffmpeg_progress(
         job_manager.update_job(
             job_id,
             status="processing",
-            progress=99.0 if progress_status != 'end' else 99.5,
+            # No measure of how long a remux takes: report the stage and let
+            # the page ease through the processing slice.
             got=got_disp,
             stage=stage_disp
         )
@@ -175,40 +180,67 @@ def create_ydl_opts(
     # Paths yt-dlp reports as finished, used for discovery and for purging
     # partials when a job is aborted.
 
+    # Streams already fetched (video, then audio), so one bar can span them.
+    finished_bytes = 0
+    finished_streams = 0
+
+    def _requested(info: Dict[str, Any]):
+        return info.get('requested_formats') or [info]
+
     def progress_hook(d: Dict[str, Any]):
+        nonlocal finished_bytes, finished_streams
         _raise_if_cancelled(job_id)
         status = d.get('status')
+        info = d.get('info_dict') or {}
         if status == 'finished':
             # yt-dlp resolves %(title)s internally, so its chosen filepath is
             # the only reliable source of the output name. Globbing by job id
             # cannot work once the prefix is dropped for user-facing filenames
             # (§1.3 Decision #13).
-            info = d.get('info_dict') or {}
             resolved = info.get('filepath') or info.get('_filename')
             if resolved:
                 produced_files.append(Path(resolved))
+            finished_streams += 1
+            finished_bytes += int(d.get('total_bytes') or d.get('downloaded_bytes') or 0)
+            # Only the last stream means the download is over. The first of a
+            # video+audio pair used to announce "remuxing" here, which jumped
+            # the bar to 98% and then dropped it when the audio began.
+            if finished_streams >= len(_requested(info)):
+                job_manager.update_job(
+                    job_id,
+                    status="processing",
+                    progress=DOWNLOAD_END,
+                    stage="Processing media",
+                )
         if status == 'downloading':
-            downloaded = d.get('downloaded_bytes', 0)
+            downloaded = d.get('downloaded_bytes', 0) or 0
             total = d.get('total_bytes') or d.get('total_bytes_estimate') or 0
             speed = d.get('speed')
             eta = d.get('eta')
 
-            info = d.get('info_dict', {})
             vcodec = info.get('vcodec')
             acodec = info.get('acodec')
-
-            raw_pct = (downloaded / total * 100.0) if total > 0 else 0.0
-
-            # Weight video stream 0..85%, audio stream 85..98% for multi-format downloads
             if vcodec and vcodec != 'none':
-                pct = min(85.0, raw_pct * 0.85)
                 stream_label = "video"
             elif acodec and acodec != 'none':
-                pct = min(98.0, 85.0 + (raw_pct * 0.13))
                 stream_label = "audio"
             else:
-                pct = min(95.0, raw_pct * 0.95)
                 stream_label = "stream"
+
+            # One fraction across every stream. With the sizes yt-dlp already
+            # knows, it is the bytes fetched over the bytes to fetch; without
+            # them, video is weighted over audio.
+            parts = _requested(info)
+            sizes = [int(p.get('filesize') or p.get('filesize_approx') or 0) for p in parts]
+            if len(parts) > 1 and all(sizes):
+                fraction = (finished_bytes + downloaded) / float(sum(sizes))
+            elif len(parts) > 1:
+                raw = (downloaded / total) if total > 0 else 0.0
+                fraction = (raw * VIDEO_SHARE if finished_streams == 0
+                            else VIDEO_SHARE + raw * (1.0 - VIDEO_SHARE))
+            else:
+                fraction = (downloaded / total) if total > 0 else 0.0
+            pct = download_pct(fraction)
 
             speed_str = format_speed(speed)
             eta_str = format_eta(eta)
@@ -217,18 +249,11 @@ def create_ydl_opts(
             job_manager.update_job(
                 job_id,
                 status="downloading",
-                progress=round(pct, 1),
+                progress=pct,
                 speed=speed_str,
                 eta=eta_str,
                 got=got_str,
                 stage=f"Downloading {stream_label} payload"
-            )
-        elif status == 'finished':
-            job_manager.update_job(
-                job_id,
-                status="processing",
-                progress=98.5,
-                stage="Remuxing & processing media"
             )
 
     def postprocessor_hook(d: Dict[str, Any]):
@@ -236,11 +261,11 @@ def create_ydl_opts(
         postprocessor = d.get('postprocessor', '')
         if status == 'started':
             if "ExtractAudio" in postprocessor:
-                job_manager.update_job(job_id, status="processing", progress=99.0, stage="Converting audio to MP3...")
+                job_manager.update_job(job_id, status="processing", progress=PROCESS_START, stage="Converting audio to MP3...")
             elif "EmbedThumbnail" in postprocessor or "Metadata" in postprocessor:
-                job_manager.update_job(job_id, status="processing", progress=99.0, stage="Embedding tags & artwork...")
+                job_manager.update_job(job_id, status="processing", progress=TAGS_AT, stage="Embedding tags & artwork...")
             elif "Merger" in postprocessor or "FFmpeg" in postprocessor:
-                job_manager.update_job(job_id, status="processing", progress=99.0, stage="Remuxing video & audio...")
+                job_manager.update_job(job_id, status="processing", progress=PROCESS_START, stage="Remuxing video & audio...")
         elif status == 'finished':
             # The merge/remux has completed and the file now lives in the
             # output directory. This is the only reliable source for the final
@@ -252,7 +277,7 @@ def create_ydl_opts(
                 candidate = Path(final)
                 if candidate not in produced_files:
                     produced_files.append(candidate)
-            job_manager.update_job(job_id, status="processing", progress=99.5, stage="Finalizing container...")
+            job_manager.update_job(job_id, status="processing", progress=PROCESS_END, stage="Finalizing container...")
 
     opts: Dict[str, Any] = {
         'outtmpl': out_template,
@@ -572,6 +597,7 @@ async def execute_download(job_id: str, request: DownloadRequest):
         if not primary_file:
             primary_file = matching_files[0]
 
+        job_manager.update_job(job_id, status="processing", progress=SAVE_END, stage="Saving to Downloads...")
         if staging_dir is not None:
             moved = {}
             for f in {primary_file, srt_file} - {None}:

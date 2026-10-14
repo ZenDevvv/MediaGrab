@@ -1,6 +1,7 @@
 package dev.mediagrab.engine
 
 import java.util.Locale
+import kotlin.math.roundToInt
 import kotlin.math.roundToLong
 
 /**
@@ -11,8 +12,9 @@ import kotlin.math.roundToLong
  * Needed because the library's callback only offers a percentage of the
  * current stream. A video+audio download fetches two streams, each 0..100%,
  * so feeding that through directly filled the bar and then reset it to zero
- * for the audio. Desktop weights the streams (video 0..85, audio 85..98, a
- * single stream 0..95) and so does this.
+ * for the audio. One bar spans the streams (video 85% of the download, audio
+ * 15%) and sits on the same bands as desktop's app/services/progress.py:
+ * 0..4 reading the link, 4..88 downloading, 90..96 processing, 96..100 saving.
  */
 class ProgressTracker {
 
@@ -40,17 +42,18 @@ class ProgressTracker {
         }
         PERCENT.find(line)?.let { return downloading(line, it.groupValues[1].toDouble()) }
         return STAGES.entries.firstOrNull { line.startsWith(it.key) }?.let {
-            Update(status = "processing", progress = 99, stage = it.value)
+            Update(status = "processing", progress = it.value.second, stage = it.value.first)
         }
     }
 
     private fun downloading(line: String, raw: Double): Update {
         val label: String
-        val pct = when {
-            streams >= 2 && stream <= 1 -> { label = "video"; minOf(85.0, raw * 0.85) }
-            streams >= 2 -> { label = "audio"; minOf(98.0, 85.0 + raw * 0.13) }
-            else -> { label = "stream"; minOf(95.0, raw * 0.95) }
+        val fraction = when {
+            streams >= 2 && stream <= 1 -> { label = "video"; raw / 100 * VIDEO_SHARE }
+            streams >= 2 -> { label = "audio"; VIDEO_SHARE + raw / 100 * (1 - VIDEO_SHARE) }
+            else -> { label = "stream"; raw / 100 }
         }
+        val pct = READ_END + fraction.coerceIn(0.0, 1.0) * (DOWNLOAD_END - READ_END)
         val total = SIZE.find(line)?.let { parseBytes(it.groupValues[1], it.groupValues[2]) }
         val speed = SPEED.find(line)?.let { parseBytes(it.groupValues[1], it.groupValues[2]) }
         val eta = ETA.find(line)?.groupValues?.get(1)?.let(::parseClock)
@@ -59,7 +62,7 @@ class ProgressTracker {
         } else null
         return Update(
             status = "downloading",
-            progress = pct.toInt(),
+            progress = pct.roundToInt(),
             speed = formatSpeed(speed),
             eta = formatEta(eta),
             got = got,
@@ -67,26 +70,34 @@ class ProgressTracker {
         )
     }
 
-    private companion object {
+    companion object {
+        const val READ_END = 4.0
+        const val DOWNLOAD_END = 88.0
+        const val PROCESS_START = 90
+        const val TAGS_AT = 94
+        const val PROCESS_END = 96
+        const val SAVE_END = 99
+        private const val VIDEO_SHARE = 0.85
+
         // [info] abc: Downloading 1 format(s): 398+140
-        val FORMATS = Regex("""Downloading \d+ format\(s\): (\S+)""")
+        private val FORMATS = Regex("""Downloading \d+ format\(s\): (\S+)""")
         // [download]  37.5% of ~  67.98MiB at    3.97MiB/s ETA 00:17
-        val PERCENT = Regex("""^\[download]\s+(\d+(?:\.\d+)?)%""")
-        val SIZE = Regex("""of\s+~?\s*(\d+(?:\.\d+)?)([KMGT]?i?B)""")
-        val SPEED = Regex("""at\s+(\d+(?:\.\d+)?)([KMGT]?i?B)/s""")
-        val ETA = Regex("""ETA\s+(\d+(?::\d+)+)""")
+        private val PERCENT = Regex("""^\[download]\s+(\d+(?:\.\d+)?)%""")
+        private val SIZE = Regex("""of\s+~?\s*(\d+(?:\.\d+)?)([KMGT]?i?B)""")
+        private val SPEED = Regex("""at\s+(\d+(?:\.\d+)?)([KMGT]?i?B)/s""")
+        private val ETA = Regex("""ETA\s+(\d+(?::\d+)+)""")
 
         // Desktop's postprocessor_hook wording, keyed on yt-dlp's line prefix.
-        val STAGES = linkedMapOf(
-            "[ExtractAudio]" to "Converting audio to MP3...",
-            "[EmbedThumbnail]" to "Embedding tags & artwork...",
-            "[Metadata]" to "Embedding tags & artwork...",
-            "[Merger]" to "Remuxing video & audio...",
-            "[EmbedSubtitle]" to "Remuxing video & audio...",
-            "[FixupM3u8]" to "Remuxing video & audio...",
+        private val STAGES = linkedMapOf(
+            "[ExtractAudio]" to ("Converting audio to MP3..." to PROCESS_START),
+            "[EmbedThumbnail]" to ("Embedding tags & artwork..." to TAGS_AT),
+            "[Metadata]" to ("Embedding tags & artwork..." to TAGS_AT),
+            "[Merger]" to ("Remuxing video & audio..." to PROCESS_START),
+            "[EmbedSubtitle]" to ("Remuxing video & audio..." to PROCESS_START),
+            "[FixupM3u8]" to ("Remuxing video & audio..." to PROCESS_START),
         )
 
-        fun parseBytes(value: String, unit: String): Long {
+        private fun parseBytes(value: String, unit: String): Long {
             val power = when (unit.firstOrNull()) {
                 'K' -> 1; 'M' -> 2; 'G' -> 3; 'T' -> 4; else -> 0
             }
@@ -96,7 +107,7 @@ class ProgressTracker {
             return bytes.roundToLong()
         }
 
-        fun parseClock(clock: String): Long =
+        private fun parseClock(clock: String): Long =
             clock.split(':').fold(0L) { acc, part -> acc * 60 + part.toLong() }
     }
 }
