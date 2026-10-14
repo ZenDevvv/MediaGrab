@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The MediaGrab mark (static/icons/mediagrab-icon-maskable.svg), as an adaptive
+  icon foreground: same paths, same 64-unit space, same strokes.
+
+  Scaled to 0.86 about the mark's centre (32,32) and moved to the canvas centre
+  (54,54). The PWA maskable icon puts the mark at 67.5% of the canvas, which a
+  circular launcher mask would clip; Android only guarantees the central 66dp
+  circle of 108dp, and the stroked mark's ~72-unit diagonal at 0.86 fits it.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:pivotX="32"
+        android:pivotY="32"
+        android:scaleX="0.86"
+        android:scaleY="0.86"
+        android:translateX="22"
+        android:translateY="22">
+        <!-- Brackets: a wide ink stroke under a narrow white one. -->
+        <path
+            android:pathData="M21,12H13V52H21"
+            android:strokeColor="#13171B"
+            android:strokeWidth="12"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round" />
+        <path
+            android:pathData="M43,12H51V52H43"
+            android:strokeColor="#13171B"
+            android:strokeWidth="12"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round" />
+        <path
+            android:pathData="M21,12H13V52H21"
+            android:strokeColor="#FFFFFF"
+            android:strokeWidth="4"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round" />
+        <path
+            android:pathData="M43,12H51V52H43"
+            android:strokeColor="#FFFFFF"
+            android:strokeWidth="4"
+            android:strokeLineCap="round"
+            android:strokeLineJoin="round" />
+        <!-- Play triangle. -->
+        <path
+            android:pathData="M26,22.5L40,32L26,41.5Z"
+            android:fillColor="#13171B"
+            android:strokeColor="#13171B"
+            android:strokeWidth="3"
+            android:strokeLineJoin="round" />
+    </group>
+</vector>
